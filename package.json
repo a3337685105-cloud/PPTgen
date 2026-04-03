@@ -1,0 +1,19 @@
+{
+  "name": "wan27-image-studio",
+  "version": "1.0.0",
+  "description": "Local web app for Wan 2.7 image generation and editing via DashScope.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "dashscope",
+    "wan2.7",
+    "image-generation",
+    "web-ui"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

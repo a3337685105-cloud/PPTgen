@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PPT Image Studio</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">DashScope / Wan 2.7 / Qwen 3.6 Plus</p>
+          <h1>PPT 特化版图片生成工作台</h1>
+          <p class="hero-text">
+            面向 PPT 制作与改图的本地工作台，支持版式区域规划、万相 2.7 生图与编辑、Qwen
+            提示词助手、本地下载保存。
+          </p>
+        </div>
+        <div class="hero-badge">
+          <span>版式区域</span>
+          <span>一键提示词</span>
+          <span>局部改图</span>
+          <span>多页铺垫</span>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="panel tab-strip-panel">
+          <div class="panel-head compact-head">
+            <h2>工作流导航</h2>
+            <p>先选工作链，再在链内切换子标签页。同一条链上的功能会被放在同一组里。</p>
+          </div>
+          <div class="tab-strip primary-tab-strip" role="tablist" aria-label="主标签页">
+            <button type="button" class="tab-button active" data-main-tab="settings" aria-selected="true">全局设置</button>
+            <button type="button" class="tab-button" data-main-tab="planning" aria-selected="false">PPT 规划链</button>
+            <button type="button" class="tab-button" data-main-tab="generation" aria-selected="false">出图执行链</button>
+          </div>
+        </section>
+
+        <section class="panel subtab-strip-panel" data-main-panel="planning" data-subtab-nav="planning" hidden>
+          <div class="panel-head compact-head">
+            <h2>PPT 规划链</h2>
+            <p>先定版式，再让 Qwen 给提示词建议，最后拆分页做逐页出图。</p>
+          </div>
+          <div class="tab-strip secondary-tab-strip" role="tablist" aria-label="PPT 规划子标签页">
+            <button type="button" class="tab-button active" data-subtab-button="planning" data-tab-target="layout" aria-selected="true">版式区域</button>
+            <button type="button" class="tab-button" data-subtab-button="planning" data-tab-target="assistant" aria-selected="false">Qwen 助手</button>
+            <button type="button" class="tab-button" data-subtab-button="planning" data-tab-target="workflow" aria-selected="false">拆分页工作流</button>
+          </div>
+        </section>
+
+        <section class="panel subtab-strip-panel" data-main-panel="generation" data-subtab-nav="generation" hidden>
+          <div class="panel-head compact-head">
+            <h2>出图执行链</h2>
+            <p>集中处理素材上传、局部改图、模型参数配置，以及最终的请求和结果查看。</p>
+          </div>
+          <div class="tab-strip secondary-tab-strip" role="tablist" aria-label="出图执行子标签页">
+            <button type="button" class="tab-button active" data-subtab-button="generation" data-tab-target="input" aria-selected="true">素材与改图</button>
+            <button type="button" class="tab-button" data-subtab-button="generation" data-tab-target="params" aria-selected="false">模型参数</button>
+            <button type="button" class="tab-button" data-subtab-button="generation" data-tab-target="results" aria-selected="false">请求与结果</button>
+          </div>
+        </section>
+        <section class="panel" data-main-panel="settings">
+          <div class="panel-head">
+            <h2>连接设置</h2>
+            <p>图片模型与 Qwen 助手共用同一个 API Key；北京和新加坡的 Key 不通用。</p>
+          </div>
+
+          <div class="grid two">
+            <label class="field">
+              <span>API Key</span>
+              <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" />
+            </label>
+
+            <label class="field">
+              <span>调用模式</span>
+              <select id="requestMode">
+                <option value="sync">HTTP 同步</option>
+                <option value="async">HTTP 异步</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>地域</span>
+              <select id="region">
+                <option value="singapore">新加坡</option>
+                <option value="beijing">北京</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>图片模型</span>
+              <select id="model">
+                <option value="wan2.7-image-pro">wan2.7-image-pro</option>
+                <option value="wan2.7-image">wan2.7-image</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel" data-main-panel="planning" data-sub-panel="planning:layout" hidden>
+          <div class="panel-head">
+            <h2>PPT 版式区域规划</h2>
+            <p>
+              在空白幻灯片上先规划标题区、主视觉区和留白区。这个区域信息既能辅助生图，也能喂给
+              Qwen 生成更贴近 PPT 的提示词。
+            </p>
+          </div>
+
+          <div class="grid three">
+            <label class="field">
+              <span>幻灯片比例</span>
+              <select id="slideAspect">
+                <option value="16:9">16:9 宽屏</option>
+                <option value="4:3">4:3 标准</option>
+                <option value="1:1">1:1 方图</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>常用模板</span>
+              <select id="slideTemplate">
+                <option value="blank">空白自绘</option>
+                <option value="cover">封面大图</option>
+                <option value="title-left">左文右图</option>
+                <option value="compare">左右对比</option>
+                <option value="data">数据页留白</option>
+              </select>
+            </label>
+
+            <label class="field checkbox-field">
+              <span>生图时附带版式描述</span>
+              <input id="includeRegionsInPrompt" type="checkbox" checked />
+            </label>
+          </div>
+
+          <div class="action-row">
+            <button id="applyTemplateBtn" type="button" class="ghost-btn">应用模板</button>
+            <button id="syncSlideSizeBtn" type="button" class="ghost-btn">同步比例到生图尺寸</button>
+            <button id="insertRegionsBtn" type="button" class="ghost-btn">将区域描述追加到提示词</button>
+            <button id="clearRegionsBtn" type="button" class="ghost-btn">清空区域</button>
+          </div>
+
+          <div class="planner-layout">
+            <div class="subpanel">
+              <div class="subpanel-head">
+                <h3>区域画布</h3>
+                <p id="slideCanvasHint">在画布上拖拽即可绘制区域。适合规划标题区、数字区和主视觉区。</p>
+              </div>
+              <canvas id="slideCanvas" class="slide-canvas"></canvas>
+            </div>
+
+            <div class="subpanel">
+              <div class="subpanel-head">
+                <h3>区域列表</h3>
+                <p>图片框选用于 `bbox_list`，每张图最多 2 个；这里的 PPT 区域不受这个限制。</p>
+              </div>
+              <div id="slideRegionList" class="region-list"></div>
+              <pre id="slideRegionPreview" class="code-box compact-code"></pre>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel" data-main-panel="generation" data-sub-panel="generation:input" hidden>
+          <div class="panel-head">
+            <h2>生图与改图输入</h2>
+            <p>图片会按图 1、图 2、图 3 的顺序发送；提示词会自动排在最后。</p>
+          </div>
+
+          <label class="field">
+            <span>主提示词</span>
+            <textarea
+              id="prompt"
+              rows="6"
+              placeholder="例如：高端商务发布会风格的 PPT 封面主视觉，左上预留标题区，右侧保留人物主体..."
+            ></textarea>
+          </label>
+
+          <div class="image-toolbar">
+            <label class="upload-chip">
+              <input id="fileInput" type="file" accept="image/*" multiple />
+              <span>上传本地图片</span>
+            </label>
+
+            <div class="url-adder">
+              <input id="imageUrlInput" type="url" placeholder="或添加公网图片 URL" />
+              <button id="addImageUrlBtn" type="button" class="ghost-btn">添加 URL 图片</button>
+            </div>
+          </div>
+
+          <div class="subpanel edit-target-panel">
+            <div class="subpanel-head">
+              <h3>选区改图</h3>
+              <p>选择一张现有 PPT 图作为改图底图，只在这张图上框区域，其它图继续作为参考图。</p>
+            </div>
+
+            <div class="grid three">
+              <label class="field checkbox-field">
+                <span>启用定点改图</span>
+                <input id="bboxEnabledImagePanel" type="checkbox" />
+              </label>
+
+              <label class="field">
+                <span>改图底图</span>
+                <select id="editTargetSelect">
+                  <option value="">请先上传图片</option>
+                </select>
+              </label>
+
+              <div class="field">
+                <span>说明</span>
+                <div id="editTargetHint" class="hint-box">
+                  选中后，这张图会自动作为最后一张发送，其它图片作为参考图。
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="imageList" class="image-list empty">
+            <p>还没有添加图片。文生图可以只填提示词；图像编辑、多图参考和局部框选请先添加图片。</p>
+          </div>
+        </section>
+
+        <section class="panel" data-main-panel="planning" data-sub-panel="planning:assistant" hidden>
+          <div class="panel-head">
+            <h2>千问提示词助手</h2>
+            <p>
+              使用 `qwen3.6-plus` 基于你的目标、当前提示词、上传图片和 PPT
+              区域，一键生成生图提示词、修改提示词或多页草案。
+            </p>
+          </div>
+
+          <div class="grid three">
+            <label class="field">
+              <span>助手模式</span>
+              <select id="assistantMode">
+                <option value="generate">生成单页图片提示词</option>
+                <option value="revise">修改当前图片提示词</option>
+                <option value="edit">生成改图提示词</option>
+                <option value="pages">生成多页视觉草案</option>
+              </select>
+            </label>
+
+            <label class="field checkbox-field">
+              <span>带上当前图片</span>
+              <input id="assistantUseImages" type="checkbox" checked />
+            </label>
+
+            <label class="field checkbox-field">
+              <span>带上 PPT 区域</span>
+              <input id="assistantUseRegions" type="checkbox" checked />
+            </label>
+
+            <label class="field checkbox-field">
+              <span>参考主提示词</span>
+              <input id="assistantUsePrompt" type="checkbox" checked />
+            </label>
+
+            <label class="field checkbox-field">
+              <span>开启思考模式</span>
+              <input id="assistantThinking" type="checkbox" />
+            </label>
+          </div>
+
+          <label class="field">
+            <span>你的目标</span>
+            <textarea
+              id="assistantRequest"
+              rows="5"
+              placeholder="例如：我想做一页 AI 数据分析产品发布会封面，科技感但不要太花，左上要能放标题，人物不要挡住文字。"
+            ></textarea>
+          </label>
+
+          <div class="action-row">
+            <button id="assistantSendBtn" type="button" class="primary-btn">生成提示词建议</button>
+            <button id="assistantApplyBtn" type="button" class="ghost-btn">替换主提示词</button>
+            <button id="assistantAppendBtn" type="button" class="ghost-btn">追加到主提示词</button>
+          </div>
+
+          <div id="assistantSummary" class="assistant-summary hidden"></div>
+          <pre id="assistantPreview" class="code-box"></pre>
+          <div id="assistantPages" class="page-plan"></div>
+        </section>
+
+        <section class="panel" data-main-panel="planning" data-sub-panel="planning:workflow" hidden>
+          <div class="panel-head">
+            <h2>PPT 拆分页与主题生图</h2>
+            <p>
+              参考你给的 n8n 工作流，这里新增了“长文本拆成多页 PPT -> 按主题自动拼出每页生图提示词 ->
+              逐页调用万相出图”的能力。视频分支暂时不接入。
+            </p>
+          </div>
+
+          <div class="grid three">
+            <label class="field">
+              <span>目标页数</span>
+              <input id="workflowPageCount" type="number" min="2" max="20" value="4" />
+            </label>
+
+            <label class="field">
+              <span>视觉主题</span>
+              <select id="workflowTheme">
+                <option value="papercraft">纸艺主题</option>
+                <option value="inkwash">水墨主题</option>
+              </select>
+            </label>
+
+            <div class="field">
+              <span>生成说明</span>
+              <div class="hint-box">
+                拆分页会走 `qwen3.6-plus`，逐页生图会沿用当前万相配置；批量生成时固定为每页 1 张，避免费用失控。
+              </div>
+            </div>
+          </div>
+
+          <label class="field">
+            <span>长文本 / 讲稿 / 页面文案</span>
+            <textarea
+              id="workflowContent"
+              rows="8"
+              placeholder="把整段讲稿、文案或说明文字贴进来。系统会先拆成多页，再按封面页 / 内容页 / 数据页自动生成对应的图片提示词。"
+            ></textarea>
+          </label>
+
+          <div class="action-row">
+            <button id="workflowPlanBtn" type="button" class="primary-btn">拆分页并生成逐页提示词</button>
+            <button id="workflowBatchBtn" type="button" class="ghost-btn">批量逐页生图</button>
+            <button id="workflowCopyBtn" type="button" class="ghost-btn">复制拆分页 JSON</button>
+            <button id="workflowClearBtn" type="button" class="ghost-btn">清空拆分页</button>
+          </div>
+
+          <div id="workflowThemePreview" class="theme-preview"></div>
+          <div id="workflowPlanSummary" class="assistant-summary hidden"></div>
+          <div id="workflowPlanCards" class="workflow-plan"></div>
+        </section>
+
+        <section class="panel" data-main-panel="generation" data-sub-panel="generation:params" hidden>
+          <div class="panel-head">
+            <h2>图片模型参数</h2>
+            <p>支持分辨率、张数、种子、水印、组图模式、思考模式和交互式框选。</p>
+          </div>
+
+          <div class="grid three">
+            <label class="field">
+              <span>输出尺寸模式</span>
+              <select id="sizeMode">
+                <option value="preset">预设规格</option>
+                <option value="custom">自定义宽高</option>
+              </select>
+            </label>
+
+            <label class="field" id="presetSizeField">
+              <span>预设规格</span>
+              <select id="presetSize">
+                <option value="1K">1K</option>
+                <option value="2K" selected>2K</option>
+                <option value="4K">4K</option>
+              </select>
+            </label>
+
+            <div class="field hidden" id="customSizeField">
+              <span>自定义像素</span>
+              <div class="inline-pair">
+                <input id="customWidth" type="number" min="768" placeholder="宽" />
+                <input id="customHeight" type="number" min="768" placeholder="高" />
+              </div>
+            </div>
+
+            <label class="field">
+              <span>n</span>
+              <input id="imageCount" type="number" min="1" max="12" value="1" />
+            </label>
+
+            <label class="field">
+              <span>seed</span>
+              <input id="seed" type="number" min="0" max="2147483647" placeholder="可选" />
+            </label>
+
+            <label class="field checkbox-field">
+              <span>启用 bbox 定点改图</span>
+              <input id="bboxEnabled" type="checkbox" />
+            </label>
+          </div>
+
+          <div class="toggle-row">
+            <label><input id="enableSequential" type="checkbox" /> 组图模式（enable_sequential）</label>
+            <label><input id="thinkingMode" type="checkbox" checked /> 思考模式（thinking_mode）</label>
+            <label><input id="watermark" type="checkbox" /> 添加水印（watermark）</label>
+          </div>
+
+          <div class="subpanel">
+            <div class="subpanel-head">
+              <h3>Color Palette</h3>
+              <button id="addPaletteBtn" type="button" class="ghost-btn">添加颜色</button>
+            </div>
+            <div id="paletteList" class="palette-list"></div>
+            <p class="hint">
+              仅在非组图模式下生效；比例总和必须为 100.00%。不填写则不会发送该参数。
+            </p>
+          </div>
+        </section>
+
+        <section class="panel" data-main-panel="generation" data-sub-panel="generation:results" hidden>
+          <div class="panel-head">
+            <h2>请求与结果</h2>
+            <p>显示实际发送的 JSON、任务状态、用量统计和生成后的图片。</p>
+          </div>
+
+          <div class="action-row">
+            <button id="sendBtn" type="button" class="primary-btn">开始调用</button>
+            <button id="refreshTaskBtn" type="button" class="ghost-btn">刷新当前任务</button>
+            <button id="copyPayloadBtn" type="button" class="ghost-btn">复制请求 JSON</button>
+            <button id="downloadAllBtn" type="button" class="ghost-btn">全部下载到本地</button>
+          </div>
+
+          <div id="statusBar" class="status-bar">等待输入。</div>
+
+          <div class="result-grid">
+            <div class="subpanel">
+              <div class="subpanel-head">
+                <h3>请求 JSON</h3>
+              </div>
+              <pre id="payloadPreview" class="code-box"></pre>
+            </div>
+
+            <div class="subpanel">
+              <div class="subpanel-head">
+                <h3>响应 JSON</h3>
+              </div>
+              <pre id="responsePreview" class="code-box"></pre>
+            </div>
+          </div>
+
+          <div id="usageBox" class="usage-box hidden"></div>
+          <div id="resultImages" class="result-images"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+  </html>
