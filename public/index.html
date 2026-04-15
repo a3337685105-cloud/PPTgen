@@ -3,74 +3,42 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PPT Image Studio</title>
+    <title>Nano Banana PPT Studio</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <div class="page-shell">
-      <header class="hero">
-        <div class="hero-copy">
-          <p class="eyebrow">DashScope / Wan 2.7 / Qwen 3.6 Plus</p>
-          <h1>PPT 特化版图片生成工作台</h1>
-          <p class="hero-text">
-            面向 PPT 制作与改图的本地工作台，支持版式区域规划、万相 2.7 生图与编辑、Qwen
-            提示词助手、本地下载保存。
-          </p>
-        </div>
-        <div class="hero-badge">
-          <span>版式区域</span>
-          <span>一键提示词</span>
-          <span>局部改图</span>
-          <span>多页铺垫</span>
+      <header class="hero compact-hero">
+        <p class="eyebrow">DashScope / Wan 2.7 / Google Gemini / Qwen 3.6 Plus</p>
+        <div class="hero-main">
+          <div class="hero-copy">
+            <h1>PPT 特化版图片生成工作台</h1>
+            <p class="hero-text">
+              现在只围绕三条主流程来工作：省事流、亲自动手流、已有 PPT 修改流。
+              把主题、排版、改图和结果回流收拢到更短的路径里。
+            </p>
+          </div>
+          <div class="hero-badge">
+            <span>省事流</span>
+            <span>亲自动手流</span>
+            <span>已有 PPT 修改</span>
+          </div>
         </div>
       </header>
 
       <main class="layout">
-        <section class="panel tab-strip-panel">
+        <section class="panel compact-panel settings-panel">
           <div class="panel-head compact-head">
-            <h2>工作流导航</h2>
-            <p>先选工作链，再在链内切换子标签页。同一条链上的功能会被放在同一组里。</p>
+            <h2>项目设置</h2>
+            <p>这里先放 API Key、调用模式和模型参数。风格模板会放到下面的主流程共享步骤里处理。</p>
           </div>
-          <div class="tab-strip primary-tab-strip" role="tablist" aria-label="主标签页">
-            <button type="button" class="tab-button active" data-main-tab="settings" aria-selected="true">全局设置</button>
-            <button type="button" class="tab-button" data-main-tab="planning" aria-selected="false">PPT 规划链</button>
-            <button type="button" class="tab-button" data-main-tab="generation" aria-selected="false">出图执行链</button>
-          </div>
-        </section>
-
-        <section class="panel subtab-strip-panel" data-main-panel="planning" data-subtab-nav="planning" hidden>
-          <div class="panel-head compact-head">
-            <h2>PPT 规划链</h2>
-            <p>先定版式，再让 Qwen 给提示词建议，最后拆分页做逐页出图。</p>
-          </div>
-          <div class="tab-strip secondary-tab-strip" role="tablist" aria-label="PPT 规划子标签页">
-            <button type="button" class="tab-button active" data-subtab-button="planning" data-tab-target="layout" aria-selected="true">版式区域</button>
-            <button type="button" class="tab-button" data-subtab-button="planning" data-tab-target="assistant" aria-selected="false">Qwen 助手</button>
-            <button type="button" class="tab-button" data-subtab-button="planning" data-tab-target="workflow" aria-selected="false">拆分页工作流</button>
-          </div>
-        </section>
-
-        <section class="panel subtab-strip-panel" data-main-panel="generation" data-subtab-nav="generation" hidden>
-          <div class="panel-head compact-head">
-            <h2>出图执行链</h2>
-            <p>集中处理素材上传、局部改图、模型参数配置，以及最终的请求和结果查看。</p>
-          </div>
-          <div class="tab-strip secondary-tab-strip" role="tablist" aria-label="出图执行子标签页">
-            <button type="button" class="tab-button active" data-subtab-button="generation" data-tab-target="input" aria-selected="true">素材与改图</button>
-            <button type="button" class="tab-button" data-subtab-button="generation" data-tab-target="params" aria-selected="false">模型参数</button>
-            <button type="button" class="tab-button" data-subtab-button="generation" data-tab-target="results" aria-selected="false">请求与结果</button>
-          </div>
-        </section>
-        <section class="panel" data-main-panel="settings">
-          <div class="panel-head">
-            <h2>连接设置</h2>
-            <p>图片模型与 Qwen 助手共用同一个 API Key；北京和新加坡的 Key 不通用。</p>
-          </div>
-
-          <div class="grid two">
+          <div class="settings-grid">
             <label class="field">
-              <span>API Key</span>
-              <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" />
+              <span>DashScope API Key</span>
+              <div class="api-key-row">
+                <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" />
+                <button id="testApiKeyBtn" type="button" class="ghost-btn">测试 API Key</button>
+              </div>
             </label>
 
             <label class="field">
@@ -84,7 +52,6 @@
             <label class="field">
               <span>地域</span>
               <select id="region">
-                <option value="singapore">新加坡</option>
                 <option value="beijing">北京</option>
               </select>
             </label>
@@ -94,350 +61,796 @@
               <select id="model">
                 <option value="wan2.7-image-pro">wan2.7-image-pro</option>
                 <option value="wan2.7-image">wan2.7-image</option>
+                <option value="gemini-3-pro-image-preview">gemini-3-pro-image-preview · Nano Banana Pro</option>
               </select>
             </label>
+
           </div>
+          <div id="apiKeyStatus" class="hint-box api-key-status"></div>
         </section>
 
-        <section class="panel" data-main-panel="planning" data-sub-panel="planning:layout" hidden>
-          <div class="panel-head">
-            <h2>PPT 版式区域规划</h2>
-            <p>
-              在空白幻灯片上先规划标题区、主视觉区和留白区。这个区域信息既能辅助生图，也能喂给
-              Qwen 生成更贴近 PPT 的提示词。
-            </p>
-          </div>
-
-          <div class="grid three">
-            <label class="field">
-              <span>幻灯片比例</span>
-              <select id="slideAspect">
-                <option value="16:9">16:9 宽屏</option>
-                <option value="4:3">4:3 标准</option>
-                <option value="1:1">1:1 方图</option>
-              </select>
-            </label>
-
-            <label class="field">
-              <span>常用模板</span>
-              <select id="slideTemplate">
-                <option value="blank">空白自绘</option>
-                <option value="cover">封面大图</option>
-                <option value="title-left">左文右图</option>
-                <option value="compare">左右对比</option>
-                <option value="data">数据页留白</option>
-              </select>
-            </label>
-
-            <label class="field checkbox-field">
-              <span>生图时附带版式描述</span>
-              <input id="includeRegionsInPrompt" type="checkbox" checked />
-            </label>
-          </div>
-
-          <div class="action-row">
-            <button id="applyTemplateBtn" type="button" class="ghost-btn">应用模板</button>
-            <button id="syncSlideSizeBtn" type="button" class="ghost-btn">同步比例到生图尺寸</button>
-            <button id="insertRegionsBtn" type="button" class="ghost-btn">将区域描述追加到提示词</button>
-            <button id="clearRegionsBtn" type="button" class="ghost-btn">清空区域</button>
-          </div>
-
-          <div class="planner-layout">
-            <div class="subpanel">
-              <div class="subpanel-head">
-                <h3>区域画布</h3>
-                <p id="slideCanvasHint">在画布上拖拽即可绘制区域。适合规划标题区、数字区和主视觉区。</p>
-              </div>
-              <canvas id="slideCanvas" class="slide-canvas"></canvas>
-            </div>
-
-            <div class="subpanel">
-              <div class="subpanel-head">
-                <h3>区域列表</h3>
-                <p>图片框选用于 `bbox_list`，每张图最多 2 个；这里的 PPT 区域不受这个限制。</p>
-              </div>
-              <div id="slideRegionList" class="region-list"></div>
-              <pre id="slideRegionPreview" class="code-box compact-code"></pre>
-            </div>
-          </div>
-        </section>
-
-        <section class="panel" data-main-panel="generation" data-sub-panel="generation:input" hidden>
-          <div class="panel-head">
-            <h2>生图与改图输入</h2>
-            <p>图片会按图 1、图 2、图 3 的顺序发送；提示词会自动排在最后。</p>
-          </div>
-
-          <label class="field">
-            <span>主提示词</span>
-            <textarea
-              id="prompt"
-              rows="6"
-              placeholder="例如：高端商务发布会风格的 PPT 封面主视觉，左上预留标题区，右侧保留人物主体..."
-            ></textarea>
-          </label>
-
-          <div class="image-toolbar">
-            <label class="upload-chip">
-              <input id="fileInput" type="file" accept="image/*" multiple />
-              <span>上传本地图片</span>
-            </label>
-
-            <div class="url-adder">
-              <input id="imageUrlInput" type="url" placeholder="或添加公网图片 URL" />
-              <button id="addImageUrlBtn" type="button" class="ghost-btn">添加 URL 图片</button>
-            </div>
-          </div>
-
-          <div class="subpanel edit-target-panel">
-            <div class="subpanel-head">
-              <h3>选区改图</h3>
-              <p>选择一张现有 PPT 图作为改图底图，只在这张图上框区域，其它图继续作为参考图。</p>
-            </div>
-
-            <div class="grid three">
-              <label class="field checkbox-field">
-                <span>启用定点改图</span>
-                <input id="bboxEnabledImagePanel" type="checkbox" />
-              </label>
-
+        <details class="panel compact-panel advanced-panel" hidden>
+          <summary>高级出图参数</summary>
+          <div class="details-body">
+            <div class="grid four">
               <label class="field">
-                <span>改图底图</span>
-                <select id="editTargetSelect">
-                  <option value="">请先上传图片</option>
+                <span>输出尺寸模式</span>
+                <select id="sizeMode">
+                  <option value="preset">预设规格</option>
+                  <option value="custom">自定义宽高</option>
                 </select>
               </label>
 
-              <div class="field">
-                <span>说明</span>
-                <div id="editTargetHint" class="hint-box">
-                  选中后，这张图会自动作为最后一张发送，其它图片作为参考图。
+              <label class="field" id="presetSizeField">
+                <span>预设规格</span>
+                <select id="presetSize">
+                  <option value="1K">1K</option>
+              <option value="2K">2K</option>
+              <option value="4K" selected>4K</option>
+                </select>
+              </label>
+
+              <div class="field hidden" id="customSizeField">
+                <span>自定义像素</span>
+                <div class="inline-pair">
+                  <input id="customWidth" type="number" min="768" placeholder="宽" />
+                  <input id="customHeight" type="number" min="768" placeholder="高" />
                 </div>
               </div>
+
+              <label class="field">
+                <span>n</span>
+                <input id="imageCount" type="number" min="1" max="12" value="1" />
+              </label>
+
+              <label class="field">
+                <span>seed</span>
+                <input id="seed" type="number" min="0" max="2147483647" placeholder="可选" />
+              </label>
+
+              <label class="field checkbox-field">
+                <span>启用 bbox 定点改图</span>
+                <input id="bboxEnabled" type="checkbox" />
+              </label>
+            </div>
+
+            <div class="toggle-row">
+              <label><input id="enableSequential" type="checkbox" /> 组图模式</label>
+              <label><input id="thinkingMode" type="checkbox" checked /> 思考模式</label>
+              <label><input id="watermark" type="checkbox" /> 添加水印</label>
+            </div>
+
+            <div class="subpanel slim-subpanel">
+              <div class="subpanel-head">
+                <h3>Color Palette</h3>
+                <button id="addPaletteBtn" type="button" class="ghost-btn">添加颜色</button>
+              </div>
+              <div id="paletteList" class="palette-list"></div>
+              <p class="hint">仅在非组图模式下生效；比例总和必须为 100%。</p>
             </div>
           </div>
+        </details>
 
-          <div id="imageList" class="image-list empty">
-            <p>还没有添加图片。文生图可以只填提示词；图像编辑、多图参考和局部框选请先添加图片。</p>
+        <section class="panel compact-panel flow-nav-panel">
+          <div class="panel-head compact-head">
+            <h2>主流程</h2>
+            <p>不再拆成多层标签页，直接按当前场景切换到对应工作区。</p>
+          </div>
+          <div class="tab-strip primary-tab-strip" role="tablist" aria-label="主流程">
+            <button type="button" class="tab-button active" data-main-tab="smart" aria-selected="true">1. 省事流</button>
+            <button type="button" class="tab-button" data-main-tab="manual" aria-selected="false">2. 亲自动手流</button>
+            <button type="button" class="tab-button" data-main-tab="revise" aria-selected="false">3. 已有 PPT 修改</button>
           </div>
         </section>
 
-        <section class="panel" data-main-panel="planning" data-sub-panel="planning:assistant" hidden>
-          <div class="panel-head">
-            <h2>千问提示词助手</h2>
-            <p>
-              使用 `qwen3.6-plus` 基于你的目标、当前提示词、上传图片和 PPT
-              区域，一键生成生图提示词、修改提示词或多页草案。
-            </p>
+        <section class="panel compact-panel theme-flow-panel">
+          <div class="panel-head compact-head">
+            <div>
+              <p class="section-kicker">共享步骤 0</p>
+              <h2>先固定风格模板</h2>
+            </div>
+            <p>先输入风格关键词，生成并确认共享风格模板。生成过的风格会自动存到下方风格库，之后可以重新切换。</p>
           </div>
 
-          <div class="grid three">
-            <label class="field">
-              <span>助手模式</span>
-              <select id="assistantMode">
-                <option value="generate">生成单页图片提示词</option>
-                <option value="revise">修改当前图片提示词</option>
-                <option value="edit">生成改图提示词</option>
-                <option value="pages">生成多页视觉草案</option>
+            <div class="theme-inline-bar">
+              <label class="field theme-name-field">
+                <span>风格关键词 / 初始想法</span>
+                <input id="themeName" type="text" placeholder="例如：炫酷科技学术风、未来医疗、奢华科技、国风水墨" />
+              </label>
+            <label class="field theme-decoration-field">
+              <span>装饰强度</span>
+              <select id="themeDecorationLevel">
+                <option value="plain">朴素</option>
+                <option value="medium" selected>中等</option>
+                <option value="complex">复杂</option>
               </select>
             </label>
+              <button id="generateThemeBtn" type="button" class="ghost-btn">AI 生成风格模板</button>
+              <div id="themeStatus" class="hint-box theme-status-box">先输入几个风格词，再生成并确认风格模板。确认后才会进入正文拆分页。</div>
+            </div>
 
-            <label class="field checkbox-field">
-              <span>带上当前图片</span>
-              <input id="assistantUseImages" type="checkbox" checked />
-            </label>
+            <section id="pptPreferenceSurvey" class="ppt-preference-survey">
+              <div class="subpanel-head">
+                <div>
+                  <h3>开场偏好问卷</h3>
+                  <p>先用几个档位告诉系统你更喜欢哪种 PPT 味道。后面的拆分页、逐页版式整理和最终提示词都会参考这些偏好。</p>
+                </div>
+              </div>
+              <div class="ppt-preference-grid">
+                <label class="field">
+                  <span>版式变化</span>
+                  <select id="prefLayoutVariety">
+                    <option value="balanced" selected>平衡变化</option>
+                    <option value="uniform">统一稳定</option>
+                    <option value="diverse">尽量多样</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>视觉细节</span>
+                  <select id="prefDetailLevel">
+                    <option value="polished" selected>精致平衡</option>
+                    <option value="minimal">偏简约</option>
+                    <option value="rich">偏精细</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>留白与信息量</span>
+                  <select id="prefVisualDensity">
+                    <option value="balanced" selected>均衡</option>
+                    <option value="airy">留白更多</option>
+                    <option value="dense">信息更满</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>图文主次</span>
+                  <select id="prefCompositionFocus">
+                    <option value="balanced" selected>图文平衡</option>
+                    <option value="imageLead">视觉主导</option>
+                    <option value="textLead">内容主导</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>数据页表达</span>
+                  <select id="prefDataNarrative">
+                    <option value="balanced" selected>适度信息图</option>
+                    <option value="clean">清晰克制</option>
+                    <option value="expressive">视觉化强调</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>整体气质</span>
+                  <select id="prefPageMood">
+                    <option value="modern" selected>现代清爽</option>
+                    <option value="steady">稳重统一</option>
+                    <option value="dramatic">更有冲击</option>
+                  </select>
+                </label>
+              </div>
+              <div id="pptPreferenceSummary" class="hint-box">当前默认：平衡变化、精致平衡、均衡信息量、图文平衡、适度信息图、现代清爽。</div>
+            </section>
 
-            <label class="field checkbox-field">
-              <span>带上 PPT 区域</span>
-              <input id="assistantUseRegions" type="checkbox" checked />
+            <div class="theme-learning-bar">
+            <label class="upload-chip theme-upload-chip">
+              <input id="themeReferenceInput" type="file" accept="image/*" multiple />
+              <span>上传风格截图</span>
             </label>
-
-            <label class="field checkbox-field">
-              <span>参考主提示词</span>
-              <input id="assistantUsePrompt" type="checkbox" checked />
-            </label>
-
-            <label class="field checkbox-field">
-              <span>开启思考模式</span>
-              <input id="assistantThinking" type="checkbox" />
-            </label>
+            <button id="learnThemeBtn" type="button" class="ghost-btn">学习截图风格</button>
+            <div id="themeReferenceHint" class="hint-box theme-reference-hint">还没有风格截图</div>
           </div>
+          <div id="themeReferenceList" class="theme-reference-list"></div>
 
-          <label class="field">
-            <span>你的目标</span>
-            <textarea
-              id="assistantRequest"
-              rows="5"
-              placeholder="例如：我想做一页 AI 数据分析产品发布会封面，科技感但不要太花，左上要能放标题，人物不要挡住文字。"
-            ></textarea>
-          </label>
-
-          <div class="action-row">
-            <button id="assistantSendBtn" type="button" class="primary-btn">生成提示词建议</button>
-            <button id="assistantApplyBtn" type="button" class="ghost-btn">替换主提示词</button>
-            <button id="assistantAppendBtn" type="button" class="ghost-btn">追加到主提示词</button>
-          </div>
-
-          <div id="assistantSummary" class="assistant-summary hidden"></div>
-          <pre id="assistantPreview" class="code-box"></pre>
-          <div id="assistantPages" class="page-plan"></div>
-        </section>
-
-        <section class="panel" data-main-panel="planning" data-sub-panel="planning:workflow" hidden>
-          <div class="panel-head">
-            <h2>PPT 拆分页与主题生图</h2>
-            <p>
-              参考你给的 n8n 工作流，这里新增了“长文本拆成多页 PPT -> 按主题自动拼出每页生图提示词 ->
-              逐页调用万相出图”的能力。视频分支暂时不接入。
-            </p>
-          </div>
-
-          <div class="grid three">
-            <label class="field">
-              <span>目标页数</span>
-              <input id="workflowPageCount" type="number" min="2" max="20" value="4" />
-            </label>
-
-            <label class="field">
-              <span>视觉主题</span>
-              <select id="workflowTheme">
-                <option value="papercraft">纸艺主题</option>
-                <option value="inkwash">水墨主题</option>
+          <div class="theme-library-bar">
+            <label class="field theme-library-field">
+              <span>已生成风格库</span>
+              <select id="themeLibrarySelect">
+                <option value="">还没有已生成风格</option>
               </select>
             </label>
+            <label class="harness-toggle" for="pptHarnessEnabled">
+              <input id="pptHarnessEnabled" type="checkbox" checked />
+              <span>PPT Harness</span>
+            </label>
+          </div>
 
-            <div class="field">
-              <span>生成说明</span>
-              <div class="hint-box">
-                拆分页会走 `qwen3.6-plus`，逐页生图会沿用当前万相配置；批量生成时固定为每页 1 张，避免费用失控。
+          <div id="themeProgress" class="progress-bar hidden" aria-hidden="true"><span></span></div>
+
+          <section id="themeReviewPanel" class="subpanel theme-review-panel hidden">
+            <div class="subpanel-head">
+              <div>
+                <h3>AI 生成的风格模板</h3>
+                <p>先看一遍这套模板是否对味。确认之后，省事流才会开放正文拆分页；如果不满意，可以直接切回其他已生成风格，或重新输入新风格。</p>
+              </div>
+              <div class="action-row">
+                <button id="confirmThemeBtn" type="button" class="primary-btn">确认这个风格</button>
               </div>
             </div>
+
+            <div class="theme-review-grid">
+              <article class="theme-review-card">
+                <strong>Basic</strong>
+                <p id="themeBasicPreview"></p>
+              </article>
+              <article class="theme-review-card">
+                <strong>Cover</strong>
+                <p id="themeCoverPreview"></p>
+              </article>
+              <article class="theme-review-card">
+                <strong>Content</strong>
+                <p id="themeContentPreview"></p>
+              </article>
+              <article class="theme-review-card">
+                <strong>Data</strong>
+                <p id="themeDataPreview"></p>
+              </article>
+            </div>
+          </section>
+
+          <input id="workflowTheme" type="hidden" value="" />
+        </section>
+
+        <section class="panel compact-panel file-context-panel">
+          <div class="panel-head compact-head">
+            <div>
+              <p class="section-kicker">共享上下文</p>
+              <h2>文件上下文</h2>
+            </div>
+            <p>支持上传 Qwen 3.6 常见文档、图片、音频和视频格式。文档会尽量抽取文字，图片可直接预览或送去改图。</p>
+          </div>
+          <div class="file-context-toolbar">
+            <label class="upload-chip">
+              <input
+                id="contextFileInput"
+                type="file"
+                accept=".doc,.docx,.wps,.ppt,.pptx,.xls,.xlsx,.md,.txt,.pdf,.png,.jpg,.jpeg,.bmp,.gif,.mp4,.mkv,.avi,.mov,.wmv,.webm,.flv,.aac,.amr,.flac,.m4a,.mp3,.mpeg,.ogg,.opus,.wav,.wma"
+                multiple
+              />
+              <span>上传文件</span>
+            </label>
+            <button id="clearContextFilesBtn" type="button" class="ghost-btn">清空文件</button>
+            <div id="contextFileHint" class="hint-box file-context-hint">还没有上传文件。上传后会自动提取能读的正文，并在提交 Qwen 相关请求时一起带上。</div>
+          </div>
+          <div id="contextFileList" class="context-file-list"></div>
+        </section>
+
+        <div id="statusBar" class="panel compact-panel status-bar">页面已就绪，可以开始配置和出图。</div>
+        <section id="requestLogBar" class="panel compact-panel utility-panel">
+          <div class="subpanel-head compact-head">
+            <strong>提交记录</strong>
+            <button id="clearRequestLogBtn" type="button" class="ghost-btn">清空记录</button>
+          </div>
+          <div id="requestLogList" class="request-log-list">
+            <p class="hint">还没有提交记录。之后每次点提交或发起模型请求，都会在这里留一条记录。</p>
+          </div>
+        </section>
+
+        <section class="panel flow-panel" data-main-panel="smart">
+          <div class="panel-head">
+            <div>
+              <p class="section-kicker">流程 1</p>
+              <h2>省事流：长文本一键拆页出图</h2>
+            </div>
+            <p>输入全文，按主题自动整理风格提示词、拆分页，并且批量出图。</p>
           </div>
 
-          <label class="field">
-            <span>长文本 / 讲稿 / 页面文案</span>
-            <textarea
-              id="workflowContent"
-              rows="8"
-              placeholder="把整段讲稿、文案或说明文字贴进来。系统会先拆成多页，再按封面页 / 内容页 / 数据页自动生成对应的图片提示词。"
-            ></textarea>
-          </label>
+          <div class="smart-flow-grid compact-smart-grid">
+            <div class="subpanel">
+              <div class="subpanel-head">
+                <h3>原始内容</h3>
+                <p>适合讲稿、方案文案、公众号长文，或者你已经整理好的逐页内容草案。</p>
+              </div>
 
-          <div class="action-row">
-            <button id="workflowPlanBtn" type="button" class="primary-btn">拆分页并生成逐页提示词</button>
-            <button id="workflowBatchBtn" type="button" class="ghost-btn">批量逐页生图</button>
-            <button id="workflowCopyBtn" type="button" class="ghost-btn">复制拆分页 JSON</button>
-            <button id="workflowClearBtn" type="button" class="ghost-btn">清空拆分页</button>
+              <div id="workflowGateHint" class="hint-box workflow-gate">
+                先在上面输入风格关键词，生成并确认风格模板；确认之后再贴入原始内容并拆分页。
+              </div>
+
+              <div class="theme-library-bar">
+                <label class="field theme-library-field">
+                  <span>可复用拆分页库</span>
+                  <select id="workflowPlanLibrarySelect">
+                    <option value="">还没有已保存拆分页</option>
+                  </select>
+                </label>
+              </div>
+
+              <section id="workflowPlanHistoryPanel" class="subpanel workflow-history-panel hidden">
+                <div class="subpanel-head">
+                  <div>
+                    <h3>当前拆分页档案</h3>
+                    <p id="workflowPlanHistoryMeta">选中后会显示这套方案的主题、时间和封面页摘要。</p>
+                  </div>
+                  <div class="action-row">
+                    <button id="workflowPlanDeleteBtn" type="button" class="ghost-btn">删除这套拆分页</button>
+                  </div>
+                </div>
+                <div class="workflow-history-grid">
+                  <article class="theme-review-card">
+                    <strong>封面与页数</strong>
+                    <p id="workflowPlanHistoryLead"></p>
+                  </article>
+                  <article class="theme-review-card">
+                    <strong>摘要</strong>
+                    <p id="workflowPlanHistorySummary"></p>
+                  </article>
+                </div>
+                <div id="workflowPlanHistoryPages" class="workflow-history-pages"></div>
+              </section>
+
+              <div class="grid two">
+                <label class="field">
+                  <span>目标页数</span>
+                  <input id="workflowPageCount" type="number" min="2" max="20" value="4" />
+                </label>
+
+                <div class="field">
+                  <span>流程说明</span>
+                  <div class="hint-box">
+                    会先调用 Qwen 拆分页，再把当前主题风格和版式要求写入每页提示词。
+                  </div>
+                </div>
+              </div>
+
+              <label class="field">
+                <span>长文本 / 讲稿 / 页面文案</span>
+                <textarea
+                  id="workflowContent"
+                  rows="10"
+                  placeholder="把整段讲稿、项目方案或一整篇内容贴进来。系统会先拆成多页，再按主题生成每页的风格化提示词。"
+                ></textarea>
+              </label>
+
+              <div class="step-action-strip">
+                <div class="step-action-group">
+                  <span class="step-chip">Step 1</span>
+                  <button id="workflowPlanBtn" type="button" class="primary-btn">拆分页并生成逐页提示词</button>
+                  <button id="workflowPlanStopBtn" type="button" class="ghost-btn stop-btn hidden" hidden>停止</button>
+                </div>
+                <span class="step-link" aria-hidden="true">→</span>
+                <div class="step-action-group">
+                  <span class="step-chip">Step 2</span>
+                  <button id="workflowBatchBtn" type="button" class="ghost-btn">批量逐页生图</button>
+                  <button id="workflowClearBtn" type="button" class="ghost-btn">重新开始</button>
+                </div>
+                <button id="workflowCopyBtn" type="button" class="ghost-btn hidden" hidden>复制拆分页 JSON</button>
+              </div>
+
+              <section id="workflowProgressPanel" class="workflow-progress-panel hidden" aria-live="polite">
+                <div class="workflow-progress-meta">
+                  <div class="workflow-progress-copy">
+                    <strong id="workflowProgressText">还没有开始拆分页</strong>
+                    <span id="workflowProgressStats">开始后这里会展示拆页、逐页版式整理和当前可立即生成的页数。</span>
+                  </div>
+                </div>
+                <div id="workflowProgress" class="progress-bar hidden" aria-hidden="true"><span></span></div>
+                <div id="workflowProgressVisual" class="workflow-progress-visual"></div>
+              </section>
+            </div>
           </div>
 
-          <div id="workflowThemePreview" class="theme-preview"></div>
           <div id="workflowPlanSummary" class="assistant-summary hidden"></div>
           <div id="workflowPlanCards" class="workflow-plan"></div>
+
         </section>
 
-        <section class="panel" data-main-panel="generation" data-sub-panel="generation:params" hidden>
+        <section class="panel flow-panel" data-main-panel="manual" hidden>
           <div class="panel-head">
-            <h2>图片模型参数</h2>
-            <p>支持分辨率、张数、种子、水印、组图模式、思考模式和交互式框选。</p>
+            <div>
+              <p class="section-kicker">流程 2</p>
+              <h2>亲自动手流：先排版，再让 AI 美化</h2>
+            </div>
+            <p>先在空白页上规划区域并填写文案，再把主题风格固定到提示词，最后直接出图。</p>
           </div>
 
-          <div class="grid three">
-            <label class="field">
-              <span>输出尺寸模式</span>
-              <select id="sizeMode">
-                <option value="preset">预设规格</option>
-                <option value="custom">自定义宽高</option>
-              </select>
-            </label>
+          <div class="workspace-grid">
+            <div class="workspace-stack">
+              <section class="subpanel">
+                <div class="subpanel-head">
+                  <h3>PPT 区域规划</h3>
+                  <p>手动划区时，尽量先把标题区、正文区、主视觉区和留白区定下来。</p>
+                </div>
 
-            <label class="field" id="presetSizeField">
-              <span>预设规格</span>
-              <select id="presetSize">
-                <option value="1K">1K</option>
-                <option value="2K" selected>2K</option>
-                <option value="4K">4K</option>
-              </select>
-            </label>
+                <div class="grid three">
+                  <label class="field">
+                    <span>幻灯片比例</span>
+                    <select id="slideAspect">
+                      <option value="16:9">16:9 宽屏</option>
+                      <option value="4:3">4:3 标准</option>
+                      <option value="1:1">1:1 方图</option>
+                    </select>
+                  </label>
 
-            <div class="field hidden" id="customSizeField">
-              <span>自定义像素</span>
-              <div class="inline-pair">
-                <input id="customWidth" type="number" min="768" placeholder="宽" />
-                <input id="customHeight" type="number" min="768" placeholder="高" />
-              </div>
+                  <label class="field checkbox-field">
+                    <span>出图时自动带入区域说明</span>
+                    <input id="includeRegionsInPrompt" type="checkbox" checked />
+                  </label>
+                </div>
+
+                <div class="action-row">
+                  <button id="syncSlideSizeBtn" type="button" class="ghost-btn hidden" hidden>同步比例到出图尺寸</button>
+                  <button id="insertRegionsBtn" type="button" class="ghost-btn hidden" hidden>把区域说明写进主提示词</button>
+                  <button id="clearRegionsBtn" type="button" class="ghost-btn">清空区域</button>
+                </div>
+
+                <select id="slideTemplate" hidden>
+                  <option value="blank">空白自绘</option>
+                  <option value="cover">封面大图</option>
+                  <option value="title-left">左文右图</option>
+                  <option value="compare">左右对比</option>
+                  <option value="data">数据页留白</option>
+                </select>
+                <button id="applyTemplateBtn" type="button" class="ghost-btn hidden">应用模板</button>
+
+                <div class="subpanel-head subhead-inline">
+                  <h3>区域画布</h3>
+                  <p id="slideCanvasHint">在画布上拖拽创建区域，区域标题和内容可以直接写在框里。</p>
+                </div>
+                <div class="slide-canvas-stage">
+                  <canvas id="slideCanvas" class="slide-canvas"></canvas>
+                  <div id="slideCanvasOverlay" class="slide-canvas-overlay"></div>
+                </div>
+              </section>
+
+              <section class="subpanel">
+                <div class="subpanel-head">
+                  <h3>该页提示词概览</h3>
+                  <p>这里会实时整理当前这页的风格、区域信息和页面目标，方便确认再写入主提示词。</p>
+                </div>
+                <pre id="manualLayoutPreview" class="code-box compact-code"></pre>
+                <div id="slideRegionList" class="hidden" hidden></div>
+                <pre id="slideRegionPreview" class="hidden" hidden></pre>
+              </section>
             </div>
 
-            <label class="field">
-              <span>n</span>
-              <input id="imageCount" type="number" min="1" max="12" value="1" />
-            </label>
+            <div id="manualComposeHost" class="compose-host"></div>
+          </div>
+        </section>
 
-            <label class="field">
-              <span>seed</span>
-              <input id="seed" type="number" min="0" max="2147483647" placeholder="可选" />
-            </label>
-
-            <label class="field checkbox-field">
-              <span>启用 bbox 定点改图</span>
-              <input id="bboxEnabled" type="checkbox" />
-            </label>
+        <section class="panel flow-panel" data-main-panel="revise" hidden>
+          <div class="panel-head">
+            <div>
+              <p class="section-kicker">流程 3</p>
+              <h2>已有画面修改：PPT 和普通图片都能直接改</h2>
+            </div>
+            <p>左侧直接当画板来用，右侧只保留修改提示词和提交动作。</p>
           </div>
 
-          <div class="toggle-row">
-            <label><input id="enableSequential" type="checkbox" /> 组图模式（enable_sequential）</label>
-            <label><input id="thinkingMode" type="checkbox" checked /> 思考模式（thinking_mode）</label>
-            <label><input id="watermark" type="checkbox" /> 添加水印（watermark）</label>
+          <div class="workspace-grid revise-grid">
+            <section class="subpanel revise-board-panel">
+              <div class="subpanel-head">
+                <h3>改图画板</h3>
+                <p>上传底图后，直接在左边框选局部；参考图也会一起放在这里管理。</p>
+              </div>
+
+              <div class="image-toolbar">
+                <label class="upload-chip">
+                  <input id="fileInput" type="file" accept="image/*" multiple />
+                  <span>上传本地图片</span>
+                </label>
+
+                <div class="url-adder">
+                  <input id="imageUrlInput" type="url" placeholder="或添加公网图片 URL" />
+                  <button id="addImageUrlBtn" type="button" class="ghost-btn">添加 URL 图片</button>
+                </div>
+              </div>
+
+              <div class="grid two revise-board-controls">
+                <label class="field checkbox-field">
+                  <span>启用框选局部修改</span>
+                  <input id="bboxEnabledImagePanel" type="checkbox" />
+                </label>
+
+                <label class="field">
+                  <span>当前修改底稿 / 原图</span>
+                  <select id="editTargetSelect">
+                    <option value="">请先上传图片</option>
+                  </select>
+                </label>
+
+                <label class="field checkbox-field">
+                  <span>每次结果自动替换底稿</span>
+                  <input id="autoReplaceTarget" type="checkbox" checked />
+                </label>
+
+                <div class="field">
+                  <span>历史回退</span>
+                  <button id="undoTargetBtn" type="button" class="ghost-btn">回到前一步</button>
+                </div>
+
+                <div class="field">
+                  <span>框选改图</span>
+                  <button id="bboxQuickToggleBtn" type="button" class="ghost-btn">开启框选</button>
+                </div>
+              </div>
+
+              <div id="editTargetHint" class="hint-box">
+                选中底稿后，它会自动排到最后发送，其余图片会作为参考图保留在前面。
+              </div>
+
+              <div id="imageList" class="image-list empty">
+                <p>还没有添加图片。可以先上传 PPT 截图、普通图片底稿，或者加入需要叠加的参考图。</p>
+              </div>
+            </section>
+
+            <div id="reviseComposeHost" class="compose-host"></div>
+          </div>
+        </section>
+
+        <section id="craftStudioPanel" class="panel craft-studio-panel" hidden>
+          <div class="panel-head">
+            <div>
+              <p id="studioSectionLabel" class="section-kicker">创作面板</p>
+              <h2 id="studioTitle">需求、提示词与结果</h2>
+            </div>
+            <p id="studioHint">在这里写需求、调提示词、调用 Qwen、发起出图，并查看结果。</p>
           </div>
 
-          <div class="subpanel">
+          <section id="manualHelperPanel" class="subpanel">
             <div class="subpanel-head">
-              <h3>Color Palette</h3>
-              <button id="addPaletteBtn" type="button" class="ghost-btn">添加颜色</button>
+              <h3>手动流步骤</h3>
+              <p>把属于同一步的动作放在一起：先定目标，再确认概览，最后写入主提示词。</p>
             </div>
-            <div id="paletteList" class="palette-list"></div>
-            <p class="hint">
-              仅在非组图模式下生效；比例总和必须为 100.00%。不填写则不会发送该参数。
-            </p>
-          </div>
-        </section>
 
-        <section class="panel" data-main-panel="generation" data-sub-panel="generation:results" hidden>
-          <div class="panel-head">
-            <h2>请求与结果</h2>
-            <p>显示实际发送的 JSON、任务状态、用量统计和生成后的图片。</p>
-          </div>
+            <div class="step-flow">
+              <article class="step-card">
+                <span class="step-chip">Step 1</span>
+                <h4>定义这页目标</h4>
+                <label class="field">
+                  <span>页面目标 / 区域文案总说明</span>
+                  <textarea
+                    id="manualPageGoal"
+                    rows="5"
+                    placeholder="例如：这一页是产品优势页，标题区放一句结论，右侧主视觉区突出产品主体，左下正文区放三条卖点。"
+                  ></textarea>
+                </label>
+              </article>
 
-          <div class="action-row">
-            <button id="sendBtn" type="button" class="primary-btn">开始调用</button>
-            <button id="refreshTaskBtn" type="button" class="ghost-btn">刷新当前任务</button>
-            <button id="copyPayloadBtn" type="button" class="ghost-btn">复制请求 JSON</button>
-            <button id="downloadAllBtn" type="button" class="ghost-btn">全部下载到本地</button>
-          </div>
+              <div class="step-link" aria-hidden="true">→</div>
 
-          <div id="statusBar" class="status-bar">等待输入。</div>
+              <article class="step-card">
+                <span class="step-chip">Step 2</span>
+                <h4>确认并写入</h4>
+                <p class="step-card-text">下方“该页提示词概览”会实时更新。确认没问题后，再写入主提示词。</p>
+                <div class="action-row">
+                  <button id="manualBuildPromptBtn" type="button" class="ghost-btn">刷新该页提示词概览</button>
+                  <button id="manualAppendPromptBtn" type="button" class="primary-btn">写入主提示词</button>
+                  <button id="manualCopyBriefBtn" type="button" class="ghost-btn hidden" hidden>复制排版摘要</button>
+                </div>
+              </article>
+            </div>
+          </section>
 
-          <div class="result-grid">
-            <div class="subpanel">
+          <label class="field">
+            <span id="promptLabel">本次创作需求 / 主提示词</span>
+            <textarea
+              id="prompt"
+              rows="7"
+              placeholder="例如：高端科技公司发布会风格的 PPT 页面，保留标题与正文留白，突出主体，画面干净克制。"
+            ></textarea>
+          </label>
+
+          <section id="assistantPanel" class="subpanel">
               <div class="subpanel-head">
-                <h3>请求 JSON</h3>
+                <h3>Qwen 提示词助手</h3>
+                <p>可以把当前风格模板、排版、图片和主提示词一起喂给 Qwen 做进一步润色。</p>
               </div>
-              <pre id="payloadPreview" class="code-box"></pre>
+
+            <div class="grid two">
+              <label class="field">
+                <span>助手模式</span>
+                <select id="assistantMode">
+                  <option value="generate">生成单页生图提示词</option>
+                  <option value="revise">改写当前提示词</option>
+                  <option value="edit">生成改图提示词</option>
+                  <option value="pages">生成多页视觉草案</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>你的目标</span>
+                <textarea
+                  id="assistantRequest"
+                  rows="4"
+                  placeholder="例如：保留现有版式，增强科技感；或者在不改变结构的情况下把右侧视觉做得更高级。"
+                ></textarea>
+              </label>
             </div>
 
-            <div class="subpanel">
-              <div class="subpanel-head">
-                <h3>响应 JSON</h3>
-              </div>
-              <pre id="responsePreview" class="code-box"></pre>
+            <div class="toggle-row">
+              <label><input id="assistantUseImages" type="checkbox" checked /> 带上当前图片</label>
+              <label><input id="assistantUseRegions" type="checkbox" checked /> 带上 PPT 区域</label>
+              <label><input id="assistantUsePrompt" type="checkbox" checked /> 参考主提示词</label>
+              <label><input id="assistantThinking" type="checkbox" /> 开启思考模式</label>
             </div>
+
+            <div class="step-action-strip">
+              <div class="step-action-group">
+                <span class="step-chip">Step 1</span>
+                <button id="assistantSendBtn" type="button" class="primary-btn">生成建议</button>
+              </div>
+              <span class="step-link" aria-hidden="true">→</span>
+              <div class="step-action-group">
+                <span class="step-chip">Step 2</span>
+                <button id="assistantApplyBtn" type="button" class="ghost-btn">写回主提示词</button>
+                <button id="assistantAppendBtn" type="button" class="ghost-btn hidden" hidden>追加到主提示词</button>
+              </div>
+            </div>
+
+            <div id="assistantSummary" class="assistant-summary hidden"></div>
+            <div id="assistantPages" class="page-plan"></div>
+          </section>
+
+          <div id="studioPrimaryActions" class="step-action-strip">
+            <div class="step-action-group">
+              <span class="step-chip">Step 3</span>
+              <button id="sendBtn" type="button" class="primary-btn">开始调用</button>
+              <button id="downloadAllBtn" type="button" class="ghost-btn">全部下载到本地</button>
+            </div>
+            <button id="refreshTaskBtn" type="button" class="ghost-btn hidden" hidden>刷新当前任务</button>
+            <button id="copyPayloadBtn" type="button" class="ghost-btn hidden" hidden>复制请求 JSON</button>
           </div>
 
           <div id="usageBox" class="usage-box hidden"></div>
           <div id="resultImages" class="result-images"></div>
+
+          <details id="debugPanel" class="subpanel debug-panel">
+            <summary>查看请求、响应与 Qwen 原始内容</summary>
+            <div class="details-body debug-stack">
+              <div class="result-grid">
+                <div class="subpanel slim-subpanel">
+                  <div class="subpanel-head">
+                    <h3>请求 JSON</h3>
+                  </div>
+                  <pre id="payloadPreview" class="code-box"></pre>
+                </div>
+
+                <div class="subpanel slim-subpanel">
+                  <div class="subpanel-head">
+                    <h3>响应 JSON</h3>
+                  </div>
+                  <pre id="responsePreview" class="code-box"></pre>
+                </div>
+              </div>
+
+              <div class="subpanel slim-subpanel">
+                <div class="subpanel-head">
+                  <h3>风格模板 JSON</h3>
+                </div>
+                <pre id="themeDefinitionPreview" class="code-box compact-code"></pre>
+              </div>
+
+              <div class="subpanel slim-subpanel">
+                <div class="subpanel-head">
+                  <h3>Qwen 原始返回</h3>
+                </div>
+                <pre id="assistantPreview" class="code-box compact-code"></pre>
+              </div>
+            </div>
+          </details>
         </section>
+
+        <div id="workflowDetailModal" class="modal hidden" aria-hidden="true">
+          <div id="workflowDetailBackdrop" class="modal-backdrop"></div>
+          <section id="workflowDetailPanel" class="modal-panel workflow-detail-panel">
+            <div class="subpanel-head">
+              <div>
+                <h3 id="workflowDetailTitle">页面详情</h3>
+                <p id="workflowDetailMeta"></p>
+              </div>
+              <div class="action-row workflow-detail-actions">
+                <button id="workflowDetailUseBtn" type="button" class="ghost-btn">替换主提示词</button>
+                <button id="workflowDetailCopyBtn" type="button" class="ghost-btn">复制提示词</button>
+                <button id="workflowDetailRunBtn" type="button" class="primary-btn">生成本页</button>
+                <button id="workflowDetailCloseBtn" type="button" class="ghost-btn">关闭窗口</button>
+              </div>
+            </div>
+
+            <div class="workflow-detail-grid">
+              <article class="theme-review-card">
+                <strong>最终上屏内容（可编辑）</strong>
+                <strong>系统建议上屏</strong>
+                <pre id="workflowDetailSuggestedContent" class="code-box compact-code workflow-detail-box hidden"></pre>
+                <strong>最终上屏内容（可编辑）</strong>
+                <label class="field workflow-detail-field">
+                  <span>标题</span>
+                  <input id="workflowDetailDisplayTitleInput" type="text" />
+                </label>
+                <label class="field workflow-detail-field">
+                  <span>装饰强度</span>
+                  <select id="workflowDetailDecorationLevel">
+                    <option value="plain">朴素</option>
+                    <option value="medium">中等</option>
+                    <option value="complex">复杂</option>
+                  </select>
+                </label>
+                <label class="field workflow-detail-field">
+                  <span>正文</span>
+                  <textarea id="workflowDetailVisibleTextEditor" rows="8" class="workflow-detail-editor"></textarea>
+                </label>
+                <div class="action-row workflow-detail-editor-actions">
+                  <button id="workflowDetailConfirmContentBtn" type="button" class="primary-btn">确认内容</button>
+                  <button id="workflowDetailVisibleResetBtn" type="button" class="ghost-btn">恢复系统建议</button>
+                </div>
+                <div id="workflowDetailConfirmStatus" class="hint-box workflow-research-status">当前使用系统建议。</div>
+                <label class="field workflow-detail-field">
+                  <span>联网搜索主题词</span>
+                  <input id="workflowDetailResearchQueryInput" type="text" placeholder="例如：smart window electrochromic thermochromic PDLC history" />
+                </label>
+                <div class="action-row">
+                  <button id="workflowDetailResearchBtn" type="button" class="ghost-btn">联网补充候选</button>
+                  <button id="workflowDetailResearchApplyBtn" type="button" class="ghost-btn">并入最终上屏内容</button>
+                </div>
+                <div id="workflowDetailResearchStatus" class="hint-box workflow-research-status">还没有联网补充候选。</div>
+                <div id="workflowDetailResearchList" class="workflow-research-list"></div>
+                <strong>已确认上屏预览</strong>
+                <pre id="workflowDetailConfirmedContent" class="code-box compact-code workflow-detail-box"></pre>
+                <strong>原文内容</strong>
+                <pre id="workflowDetailContent" class="code-box compact-code workflow-detail-box"></pre>
+              </article>
+              <article class="theme-review-card">
+                <strong>这一页的格式安排</strong>
+                <pre id="workflowDetailLayout" class="code-box compact-code workflow-detail-box"></pre>
+              </article>
+              <article class="theme-review-card">
+                <strong>全局风格模板</strong>
+                <pre id="workflowDetailTheme" class="code-box compact-code workflow-detail-box"></pre>
+              </article>
+              <article class="theme-review-card">
+                <strong>AI 即将提交的本页提示词</strong>
+                <pre id="workflowDetailPrompt" class="code-box compact-code workflow-detail-box"></pre>
+              </article>
+            </div>
+          </section>
+        </div>
+
+        <div id="imagePreviewModal" class="modal hidden" aria-hidden="true">
+          <div id="imagePreviewBackdrop" class="modal-backdrop"></div>
+          <section class="modal-panel image-preview-panel">
+            <div class="subpanel-head">
+              <div>
+                <h3 id="imagePreviewTitle">图片预览</h3>
+                <p>这里直接预览原图，不会触发下载。</p>
+              </div>
+              <div class="action-row">
+                <a id="imagePreviewOpenNew" href="#" target="_blank" rel="noreferrer" class="ghost-btn">新窗口打开</a>
+                <button id="imagePreviewUseTargetBtn" type="button" class="ghost-btn">作为改图底图</button>
+                <button id="imagePreviewCloseBtn" type="button" class="ghost-btn">关闭窗口</button>
+              </div>
+            </div>
+            <div class="image-preview-layout">
+              <div class="image-preview-stage">
+                <img id="imagePreviewImage" alt="图片预览" />
+              </div>
+              <aside class="image-preview-side">
+                <div class="subpanel slim-subpanel">
+                  <div class="subpanel-head">
+                    <div>
+                      <h3>直接修改这张图</h3>
+                      <p>点开原图后，可以直接把它送进改图流程，或者在这里写需求后马上提交。</p>
+                    </div>
+                  </div>
+                  <label class="field">
+                    <span>改图需求</span>
+                    <textarea id="imagePreviewPrompt" rows="6" placeholder="例如：保留原有构图，把整体科技感再拉满；或者只增强标题区和数字主体的冲击力。"></textarea>
+                  </label>
+                  <div class="action-row">
+                    <button id="imagePreviewOpenReviseBtn" type="button" class="ghost-btn">打开改图工作台</button>
+                    <button id="imagePreviewEditBtn" type="button" class="primary-btn">直接提交修改</button>
+                  </div>
+                  <div id="imagePreviewEditHint" class="hint-box file-context-hint">
+                    当前会把这张图设为改图底图；如果需要框选局部修改，可以先打开改图工作台再拖框。
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </section>
+        </div>
       </main>
     </div>
 
     <script src="/app.js"></script>
+    <script src="/ppt-harness-integration.js"></script>
+    <script src="/workflow-workbench-override.js"></script>
+    <script src="/nanobanana-override.js"></script>
+    <script src="/nanobanana-ppt-mainline.js"></script>
+    <script src="/nanobanana-experience-upgrade.js"></script>
   </body>
-  </html>
+</html>
