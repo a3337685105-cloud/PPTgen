@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PPT Studio · Nano Banana Workflow</title>
+    <link rel="stylesheet" href="/v2/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">P</div>
+          <div>
+            <div class="brand-title">PPT Studio</div>
+            <div class="brand-subtitle">Nano Banana Workflow</div>
+          </div>
+        </div>
+
+        <nav class="sidebar-nav" aria-label="主导航">
+          <button class="sidebar-tab is-active" type="button" data-tab="smart">
+            <span class="sidebar-tab-kicker">主线</span>
+            <span class="sidebar-tab-label">智能生成</span>
+          </button>
+          <button class="sidebar-tab" type="button" data-tab="revise">
+            <span class="sidebar-tab-kicker">外挂</span>
+            <span class="sidebar-tab-label">改图 / 框选</span>
+          </button>
+          <button class="sidebar-tab" type="button" data-tab="settings">
+            <span class="sidebar-tab-kicker">配置</span>
+            <span class="sidebar-tab-label">接口与参数</span>
+          </button>
+        </nav>
+
+        <section class="sidebar-card compact">
+          <div class="sidebar-card-title">页面缩放</div>
+          <div class="zoom-row">
+            <input id="workspaceZoomRange" type="range" min="50" max="140" step="5" value="100" />
+            <span id="workspaceZoomValue">100%</span>
+          </div>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <div class="workspace-body">
+          <section class="view is-active" id="view-smart" data-view="smart">
+            <div class="view-header">
+              <div>
+                <h1>智能生成</h1>
+              </div>
+            </div>
+
+            <section class="smart-ribbon">
+              <button class="ribbon-step is-active" type="button" data-step="theme">
+                <span>1</span>
+                <strong>确定风格</strong>
+              </button>
+              <div class="ribbon-arrow" aria-hidden="true"></div>
+              <button class="ribbon-step" type="button" data-step="split">
+                <span>2</span>
+                <strong>文本与拆分</strong>
+              </button>
+              <div class="ribbon-arrow" aria-hidden="true"></div>
+              <button class="ribbon-step" type="button" data-step="pages">
+                <span>3</span>
+                <strong>逐页确认与生成</strong>
+              </button>
+            </section>
+
+            <div class="smart-stage-shell">
+              <section class="smart-stage is-active" data-step-panel="theme">
+                <div class="theme-stage-grid">
+                  <article class="glass-card">
+                    <h2>开头问卷</h2>
+                    <div class="survey-grid">
+                      <label class="field">
+                        <span>风格模式</span>
+                        <select id="prefStyleMode">
+                          <option value="business">商务</option>
+                          <option value="academic">学术</option>
+                          <option value="creative">创意</option>
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span>版式变化</span>
+                        <select id="prefLayoutVariety">
+                          <option value="uniform">统一稳定</option>
+                          <option value="balanced">平衡变化</option>
+                          <option value="diverse">尽量多样</option>
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span>视觉细节</span>
+                        <select id="prefDetailLevel">
+                          <option value="minimal">偏简约</option>
+                          <option value="polished">精致平衡</option>
+                          <option value="rich">偏精细</option>
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span>留白与信息量</span>
+                        <select id="prefVisualDensity">
+                          <option value="airy">留白更多</option>
+                          <option value="balanced">均衡信息量</option>
+                          <option value="dense">信息更满</option>
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span>图文主次</span>
+                        <select id="prefCompositionFocus">
+                          <option value="imageLead">视觉主导</option>
+                          <option value="balanced">图文平衡</option>
+                          <option value="textLead">内容主导</option>
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span>数据页表达</span>
+                        <select id="prefDataNarrative">
+                          <option value="clean">清晰克制</option>
+                          <option value="balanced">适度信息图</option>
+                          <option value="expressive">更强视觉化</option>
+                        </select>
+                      </label>
+                      <label class="field">
+                        <span>整体气质</span>
+                        <select id="prefPageMood">
+                          <option value="steady">稳重统一</option>
+                          <option value="modern">现代清爽</option>
+                          <option value="dramatic">更有冲击</option>
+                        </select>
+                      </label>
+                    </div>
+                    <div class="inline-summary" id="preferenceSummary"></div>
+                  </article>
+
+                  <article class="glass-card">
+                    <h2>风格主题</h2>
+                    <div class="field-group">
+                      <label class="field grow">
+                        <span>风格关键词</span>
+                        <input id="themeName" type="text" placeholder="例如：学术科技、玻璃感商业、品牌发布" />
+                      </label>
+                      <label class="field field-sm">
+                        <span>装饰强度</span>
+                        <select id="themeDecorationLevel">
+                          <option value="plain">朴素</option>
+                          <option value="medium">中等</option>
+                          <option value="complex">复杂</option>
+                        </select>
+                      </label>
+                      <div class="theme-action-group">
+                        <button class="btn secondary" type="button" id="generateThemeBtn">生成风格</button>
+                        <button class="btn primary" type="button" id="confirmThemeBtn">确认风格</button>
+                      </div>
+                    </div>
+                    <div class="theme-preview" id="themeSummaryPreview">风格摘要</div>
+                    <details class="trace-details" id="themePromptDetails">
+                      <summary>查看给模型用的主题总纲</summary>
+                      <pre id="themeModelPrompt"></pre>
+                    </details>
+                  </article>
+                </div>
+                <div class="stage-footer">
+                  <button class="btn ghost" type="button" id="goSplitBtn" disabled>下一步</button>
+                </div>
+              </section>
+
+              <section class="smart-stage" data-step-panel="split">
+                <div class="split-stage-grid">
+                  <article class="glass-card">
+                    <h2>输入文本</h2>
+                    <label class="field">
+                      <span>目标页数</span>
+                      <input id="workflowPageCount" type="number" min="2" max="20" value="8" />
+                    </label>
+                    <label class="field field-stack">
+                      <span>主文本</span>
+                      <textarea id="workflowContent" rows="18" placeholder="把需要生成 PPT 的主文本粘贴到这里。"></textarea>
+                    </label>
+                  </article>
+
+                  <article class="glass-card">
+                    <h2>上传参考文件</h2>
+                    <div class="file-toolbar">
+                      <button class="btn secondary" type="button" id="pickReferenceFilesBtn">上传参考文件</button>
+                      <input id="referenceFilesInput" type="file" multiple hidden />
+                    </div>
+                    <div class="file-list" id="referenceFilesList"></div>
+                  </article>
+
+                  <article class="glass-card split-template-card">
+                    <h2>拆分要求</h2>
+                    <div class="template-toolbar" id="splitPresetToolbar"></div>
+                    <label class="field field-stack">
+                      <span>本次拆分模板</span>
+                      <textarea id="splitTemplateInput" rows="7"></textarea>
+                    </label>
+                  </article>
+                </div>
+                <div class="stage-footer">
+                  <button class="btn ghost" type="button" id="backToThemeBtn">上一步</button>
+                  <button class="btn primary" type="button" id="runSplitBtn">确认总内容并拆分</button>
+                </div>
+              </section>
+
+              <section class="smart-stage" data-step-panel="pages">
+                <div class="pages-stage-grid">
+                  <article class="glass-card page-list-card">
+                    <div class="card-row">
+                      <div>
+                        <h2>页面列表</h2>
+                      </div>
+                      <button class="btn ghost" type="button" id="batchGenerateReadyBtn">一键生成已排版页</button>
+                    </div>
+                    <div class="workflow-stats" id="workflowStats"></div>
+                    <div class="page-list" id="workflowPageList"></div>
+                    <details class="trace-details">
+                      <summary>查看拆分诊断</summary>
+                      <pre id="workflowDiagnostics"></pre>
+                    </details>
+                    <details class="trace-details">
+                      <summary>查看工作流 Prompt 流档</summary>
+                      <pre id="workflowPromptTrace"></pre>
+                    </details>
+                  </article>
+
+                  <article class="glass-card onscreen-card">
+                    <h2>上屏内容</h2>
+                    <div class="inline-hint" id="pageMetaHint"></div>
+                    <label class="field field-stack grow">
+                      <span>当前页上屏内容</span>
+                      <textarea id="pageOnscreenEditor" rows="20" placeholder="这里展示并允许修改当前页的上屏内容。"></textarea>
+                    </label>
+                    <div class="stage-footer tight">
+                      <button class="btn secondary" type="button" id="repreparePageBtn">确认修改并重新整理</button>
+                    </div>
+                  </article>
+
+                  <article class="glass-card artboard-card">
+                    <h2>生图区</h2>
+                    <div class="artboard-toolbar">
+                      <button class="btn ghost" type="button" id="uploadOverlayBtn">上传补充图片</button>
+                      <input id="overlayFileInput" type="file" accept="image/*" multiple hidden />
+                      <button class="btn ghost" type="button" id="clearOverlayBtn">清空叠加</button>
+                    </div>
+                    <div class="slide-frame" id="slideFrame">
+                      <div class="slide-stage" id="slideStage">
+                        <img id="slideBaseImage" alt="" hidden />
+                        <div class="slide-empty" id="slideEmptyState">生成前这里是空白画布。生成后，结果图会自动成为这页的底图。</div>
+                        <div class="overlay-layer" id="overlayLayer"></div>
+                      </div>
+                    </div>
+                    <div class="stage-footer tight">
+                      <button class="btn primary" type="button" id="generateCurrentPageBtn">生成该页</button>
+                    </div>
+                    <label class="field field-stack">
+                      <span>额外要求 / 该页修改提示词</span>
+                      <textarea id="pageExtraPrompt" rows="5" placeholder="例如：第一次生成时希望更简洁，或这页改成更强的数据对比感。"></textarea>
+                    </label>
+                    <details class="trace-details">
+                      <summary>查看这一页的 Prompt 流转</summary>
+                      <pre id="pagePromptTrace"></pre>
+                    </details>
+                    <div class="result-strip" id="pageResultStrip"></div>
+                  </article>
+                </div>
+                <div class="stage-footer">
+                  <button class="btn ghost" type="button" id="backToSplitBtn">上一步</button>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <section class="view" id="view-revise" data-view="revise">
+            <div class="view-header">
+              <div>
+                <h1>改图 / 框选</h1>
+              </div>
+            </div>
+
+            <div class="revise-grid">
+              <article class="glass-card revise-board-card">
+                <div class="revise-mini-toolbar">
+                  <button class="icon-btn" type="button" id="revisePrevBtn" aria-label="上一张">←</button>
+                  <button class="icon-btn" type="button" id="reviseNextBtn" aria-label="下一张">→</button>
+                  <button class="icon-btn" type="button" id="reviseImportBtn" aria-label="导入本地图片">＋</button>
+                  <button class="icon-btn danger" type="button" id="reviseDeleteBtn" aria-label="删除当前图片">✕</button>
+                  <input id="reviseFileInput" type="file" accept="image/*" multiple hidden />
+                </div>
+                <div class="revise-meta">
+                  <strong id="reviseImageName">请先导入底图</strong>
+                  <span id="reviseImageCounter">0 / 0</span>
+                </div>
+                <div class="revise-stage" id="reviseStage">
+                  <img id="reviseBaseImage" alt="" hidden />
+                  <canvas id="reviseCanvas"></canvas>
+                  <div class="slide-empty" id="reviseEmptyState">还没有底图。导入本地图片后就可以开始框选。</div>
+                </div>
+                <div class="thumb-strip" id="reviseThumbStrip"></div>
+              </article>
+
+              <article class="glass-card revise-control-card">
+                <h2>改图提示词</h2>
+                <label class="field field-stack grow">
+                  <span>编辑说明</span>
+                  <textarea id="revisePrompt" rows="14" placeholder="描述需要修改的内容。若已经框选，系统会优先针对选区改动。"></textarea>
+                </label>
+                <div class="stage-footer tight">
+                  <button class="btn primary" type="button" id="sendReviseBtn">提交修改</button>
+                </div>
+                <div class="result-strip" id="reviseResultStrip"></div>
+              </article>
+            </div>
+          </section>
+
+          <section class="view" id="view-settings" data-view="settings">
+            <div class="view-header">
+              <div>
+                <h1>接口与参数</h1>
+              </div>
+            </div>
+
+            <div class="settings-grid">
+              <article class="glass-card">
+                <h2>接口配置</h2>
+                <div class="settings-stack">
+                  <label class="field">
+                    <span>DashScope / Qwen API Key</span>
+                    <input id="apiKey" type="password" placeholder="用于主题、拆分和整理" />
+                  </label>
+                  <label class="field">
+                    <span>Google API Key</span>
+                    <input id="googleApiKey" type="password" placeholder="用于 Nano Banana 生图" />
+                  </label>
+                  <label class="field">
+                    <span>最终生图模型</span>
+                    <select id="workflowImageModel">
+                      <option value="gemini-3-pro-image-preview">Nano Banana Pro</option>
+                      <option value="wan2.7-image-pro">Wan 2.7</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>区域</span>
+                    <select id="region">
+                      <option value="beijing">北京</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="stage-footer tight">
+                  <button class="btn secondary" type="button" id="testApiKeyBtn">测试 Key</button>
+                </div>
+              </article>
+
+              <article class="glass-card">
+                <h2>输出参数</h2>
+                <div class="settings-stack">
+                  <label class="field">
+                    <span>页面比例</span>
+                    <select id="slideAspect">
+                      <option value="16:9">16:9</option>
+                      <option value="4:3">4:3</option>
+                      <option value="1:1">1:1</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>输出尺寸</span>
+                    <select id="outputSize">
+                      <option value="1K">1K</option>
+                      <option value="2K">2K</option>
+                      <option value="4K">4K</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>随机种子</span>
+                    <input id="seed" type="number" placeholder="可选" />
+                  </label>
+                </div>
+              </article>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+    <div class="status-toast" id="statusToast" hidden></div>
+    <script src="/v2/app.js"></script>
+  </body>
+</html>

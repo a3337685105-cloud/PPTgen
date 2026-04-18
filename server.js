@@ -8,6 +8,7 @@ const multer = require("multer");
 const JSZip = require("jszip");
 const XLSX = require("xlsx");
 const pdfParse = require("pdf-parse");
+const { installWorkflowRoutes } = require("./workflow-service");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1001,6 +1002,17 @@ app.post("/api/library", async (req, res) => {
       message: error.message || "保存项目资料库失败。",
     });
   }
+});
+
+installWorkflowRoutes(app, {
+  resolveRegion,
+  parseJsonResponse,
+  requestGeminiJson,
+  normalizeGeminiGenerateResponse,
+  buildGeminiModelUrl,
+  normalizeGeminiAspectRatio,
+  normalizeGeminiImageSize,
+  parseDataUrl,
 });
 
 app.post("/api/test-image-key", async (req, res) => {

@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-title Nano Banana PPT Studio
+title PPT Studio v2
 
 if not "%~1"=="" (
   set "APP_PORT=%~1"
@@ -50,9 +50,9 @@ if not "%APP_PORT%"=="%REQUESTED_PORT%" (
   echo [INFO] Port %REQUESTED_PORT% is already in use. Switched to %APP_PORT%.
 )
 
-set "APP_URL=http://127.0.0.1:%APP_PORT%"
+set "APP_URL=http://127.0.0.1:%APP_PORT%/v2/index.html"
 
-echo [2/3] Waiting for app to become available...
+echo [2/3] Waiting for v2 UI to become available...
 start "" powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$url = '%APP_URL%';" ^
   "for ($i = 0; $i -lt 120; $i++) {" ^
