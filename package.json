@@ -4,7 +4,9 @@
   "description": "Local PPT-focused image studio powered by Nano Banana and reusable PPT harness tooling.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "clean:artifacts": "node scripts/clean-artifacts.js",
+    "clean:artifacts:all": "node scripts/clean-artifacts.js --all-generated"
   },
   "keywords": [
     "gemini",

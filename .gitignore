@@ -2,3 +2,10 @@ node_modules
 .npm-cache
 generated-images/*
 !generated-images/.gitkeep
+exports/*
+!exports/.gitkeep
+tmp/
+tmp-server*.log
+data/ppt-guide-extract/
+data/studio-library.json
+.claude/

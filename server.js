@@ -1,7 +1,9 @@
 const crypto = require("crypto");
 const fs = require("fs");
 const fsp = require("fs/promises");
+const os = require("os");
 const path = require("path");
+const { pathToFileURL } = require("url");
 const { spawn } = require("child_process");
 const express = require("express");
 const multer = require("multer");
@@ -15,6 +17,7 @@ const PORT = process.env.PORT || 3000;
 const ROOT_DIR = __dirname;
 const PUBLIC_DIR = path.join(ROOT_DIR, "public");
 const GENERATED_DIR = path.join(ROOT_DIR, "generated-images");
+const EXPORTS_DIR = path.join(ROOT_DIR, "exports");
 const DATA_DIR = path.join(ROOT_DIR, "data");
 const LIBRARY_DOC_PATH = path.join(DATA_DIR, "studio-library.json");
 const upload = multer({
@@ -28,15 +31,36 @@ const upload = multer({
 const REGION_MAP = {
   beijing: "https://dashscope.aliyuncs.com",
 };
-const GEMINI_IMAGE_MODELS = new Set(["gemini-3-pro-image-preview"]);
+const GEMINI_IMAGE_MODELS = new Set([
+  "gemini-3.1-flash-image-preview",
+  "gemini-3-pro-image-preview",
+  "gemini-2.5-flash-image",
+]);
 const SUPPORTED_GEMINI_ASPECTS = new Set(["1:1", "4:3", "16:9", "3:4", "9:16"]);
 
 fs.mkdirSync(GENERATED_DIR, { recursive: true });
+fs.mkdirSync(EXPORTS_DIR, { recursive: true });
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 app.use(express.json({ limit: "50mb" }));
 app.use(express.static(PUBLIC_DIR));
 app.use("/generated-images", express.static(GENERATED_DIR));
+app.use("/exports", express.static(EXPORTS_DIR));
+
+const ARTIFACT_TOOL_MODULE_URL = pathToFileURL(path.join(
+  os.homedir(),
+  ".cache",
+  "codex-runtimes",
+  "codex-primary-runtime",
+  "dependencies",
+  "node",
+  "node_modules",
+  "@oai",
+  "artifact-tool",
+  "dist",
+  "artifact_tool.mjs",
+)).href;
+let artifactToolModulePromise = null;
 
 function resolveRegion(region) {
   return REGION_MAP[region] || REGION_MAP.beijing;
@@ -162,6 +186,49 @@ async function loadGeminiImageSource(source) {
   }
 
   throw new Error("Gemini 目前只支持 data URL、本地缓存图或 http(s) 图片链接作为输入。");
+}
+
+function bufferToArrayBuffer(buffer) {
+  return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+}
+
+function getPptSlideSize(slideAspect) {
+  switch (String(slideAspect || "").trim()) {
+    case "4:3":
+      return { width: 1024, height: 768 };
+    case "1:1":
+      return { width: 1080, height: 1080 };
+    default:
+      return { width: 1280, height: 720 };
+  }
+}
+
+async function loadArtifactToolModule() {
+  if (!artifactToolModulePromise) {
+    artifactToolModulePromise = import(ARTIFACT_TOOL_MODULE_URL);
+  }
+  return artifactToolModulePromise;
+}
+
+function normalizeExportText(value) {
+  return String(value || "")
+    .replace(/\r/g, "")
+    .replace(/\u00a0/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function buildExportSlides(pages) {
+  return (Array.isArray(pages) ? pages : []).map((page, index) => {
+    const title = normalizeExportText(page?.onscreenTitle || page?.pageTitle || `第${index + 1}页`).split("\n")[0].trim();
+    const body = normalizeExportText(page?.onscreenBody || page?.onscreenContent || page?.pageContent || "");
+    return {
+      pageNumber: Number(page?.pageNumber || index + 1),
+      title: title || `第${index + 1}页`,
+      body,
+      imageUrl: String(page?.imageUrl || page?.baseImage || "").trim(),
+    };
+  });
 }
 
 async function convertMessagesToGeminiContents(messages) {
@@ -1557,6 +1624,168 @@ app.post("/api/download", async (req, res) => {
     return res.status(500).json({
       code: "DownloadFailed",
       message: error.message || "保存图片到本地失败。",
+    });
+  }
+});
+
+app.post("/api/export-workflow-ppt", async (req, res) => {
+  const { projectTitle, slideAspect, pages } = req.body || {};
+  const exportSlides = buildExportSlides(pages);
+
+  if (!exportSlides.length) {
+    return res.status(400).json({
+      code: "MissingSlides",
+      message: "导出 PPT 需要至少一页内容。",
+    });
+  }
+
+  try {
+    const { Presentation, PresentationFile } = await loadArtifactToolModule();
+    const slideSize = getPptSlideSize(slideAspect);
+    const presentation = Presentation.create({ slideSize });
+    const deckTitle = normalizeExportText(projectTitle) || "智能生成导出";
+
+    for (const slideData of exportSlides) {
+      const slide = presentation.slides.add();
+      const margin = Math.round(slideSize.width * 0.05);
+      const innerWidth = slideSize.width - margin * 2;
+      const titleTop = Math.round(slideSize.height * 0.065);
+      const titleHeight = Math.round(slideSize.height * 0.09);
+      const pageBadgeWidth = Math.round(slideSize.width * 0.12);
+      const imageTop = Math.round(slideSize.height * 0.19);
+      const imageHeight = slideData.imageUrl ? Math.round(slideSize.height * 0.50) : 0;
+      const bodyTop = slideData.imageUrl ? imageTop + imageHeight + Math.round(slideSize.height * 0.04) : imageTop;
+      const bodyHeight = slideSize.height - bodyTop - margin;
+
+      slide.background.fill = "#F5F7FB";
+
+      const panel = slide.shapes.add({
+        geometry: "roundRect",
+        position: {
+          left: Math.round(slideSize.width * 0.022),
+          top: Math.round(slideSize.height * 0.03),
+          width: Math.round(slideSize.width * 0.956),
+          height: Math.round(slideSize.height * 0.94),
+        },
+        fill: "#FFFFFF",
+        line: { style: "solid", fill: "#D9E2EC", width: 1 },
+      });
+      panel.adjustmentList = [{ name: "adj", formula: "val 12000" }];
+
+      const accent = slide.shapes.add({
+        geometry: "roundRect",
+        position: {
+          left: margin,
+          top: Math.round(slideSize.height * 0.042),
+          width: Math.round(slideSize.width * 0.11),
+          height: Math.round(slideSize.height * 0.01),
+        },
+        fill: "#2563EB",
+        line: { width: 0, fill: "#2563EB" },
+      });
+      accent.adjustmentList = [{ name: "adj", formula: "val 50000" }];
+
+      const titleShape = slide.shapes.add({
+        geometry: "rect",
+        position: {
+          left: margin,
+          top: titleTop,
+          width: innerWidth - pageBadgeWidth - 20,
+          height: titleHeight,
+        },
+        fill: "#FFFFFF00",
+        line: { width: 0, fill: "#FFFFFF00" },
+      });
+      titleShape.text = slideData.title;
+      titleShape.text.fontSize = Math.round(slideSize.height * 0.045);
+      titleShape.text.bold = true;
+      titleShape.text.color = "#0F172A";
+      titleShape.text.typeface = "Microsoft YaHei";
+      titleShape.text.verticalAlignment = "middle";
+
+      const badge = slide.shapes.add({
+        geometry: "roundRect",
+        position: {
+          left: slideSize.width - margin - pageBadgeWidth,
+          top: titleTop + 4,
+          width: pageBadgeWidth,
+          height: Math.round(slideSize.height * 0.05),
+        },
+        fill: "#EEF4FF",
+        line: { width: 0, fill: "#EEF4FF" },
+      });
+      badge.adjustmentList = [{ name: "adj", formula: "val 30000" }];
+      badge.text = `第 ${slideData.pageNumber} 页`;
+      badge.text.fontSize = Math.round(slideSize.height * 0.022);
+      badge.text.color = "#2563EB";
+      badge.text.bold = true;
+      badge.text.typeface = "Microsoft YaHei";
+      badge.text.alignment = "center";
+      badge.text.verticalAlignment = "middle";
+
+      if (slideData.imageUrl) {
+        const image = await loadGeminiImageSource(slideData.imageUrl);
+        const imageShape = slide.images.add({
+          blob: bufferToArrayBuffer(image.buffer),
+          fit: "cover",
+          alt: slideData.title,
+          geometry: "roundRect",
+        });
+        imageShape.position = {
+          left: margin,
+          top: imageTop,
+          width: innerWidth,
+          height: imageHeight,
+        };
+      }
+
+      const bodyPanel = slide.shapes.add({
+        geometry: "roundRect",
+        position: {
+          left: margin,
+          top: bodyTop,
+          width: innerWidth,
+          height: Math.max(bodyHeight, Math.round(slideSize.height * 0.18)),
+        },
+        fill: "#F8FAFC",
+        line: { style: "solid", fill: "#E2E8F0", width: 1 },
+      });
+      bodyPanel.adjustmentList = [{ name: "adj", formula: "val 10000" }];
+
+      const bodyShape = slide.shapes.add({
+        geometry: "rect",
+        position: {
+          left: margin + Math.round(slideSize.width * 0.018),
+          top: bodyTop + Math.round(slideSize.height * 0.018),
+          width: innerWidth - Math.round(slideSize.width * 0.036),
+          height: Math.max(bodyHeight - Math.round(slideSize.height * 0.036), Math.round(slideSize.height * 0.14)),
+        },
+        fill: "#FFFFFF00",
+        line: { width: 0, fill: "#FFFFFF00" },
+      });
+      bodyShape.text = slideData.body || " ";
+      bodyShape.text.fontSize = slideData.imageUrl ? Math.round(slideSize.height * 0.024) : Math.round(slideSize.height * 0.03);
+      bodyShape.text.color = "#334155";
+      bodyShape.text.typeface = "Microsoft YaHei";
+      bodyShape.text.insets = { left: 0, right: 0, top: 0, bottom: 0 };
+      bodyShape.text.autoFit = "shrinkText";
+    }
+
+    const fileName = `${sanitizeSegment(deckTitle, "workflow-export")}_${buildTimestamp()}_${crypto.randomUUID().slice(0, 6)}.pptx`;
+    const targetPath = path.join(EXPORTS_DIR, fileName);
+    const pptx = await PresentationFile.exportPptx(presentation);
+    await pptx.save(targetPath);
+
+    return res.json({
+      ok: true,
+      fileName,
+      savedPath: targetPath,
+      downloadUrl: `/exports/${encodeURIComponent(fileName)}`,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      code: "WorkflowPptExportFailed",
+      message: error.message || "导出 PPT 失败。",
     });
   }
 });
