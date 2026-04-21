@@ -1,11 +1,16 @@
 const crypto = require("crypto");
 
 const WORKFLOW_ASSISTANT_MODEL = "qwen3.6-plus";
-const WORKFLOW_IMAGE_MODEL = "gemini-3.1-flash-image-preview";
+const WORKFLOW_IMAGE_MODEL = "nano-banana-2";
 const GEMINI_WORKFLOW_IMAGE_MODELS = new Set([
   "gemini-3.1-flash-image-preview",
   "gemini-3-pro-image-preview",
   "gemini-2.5-flash-image",
+]);
+const GRSAI_WORKFLOW_IMAGE_MODELS = new Set([
+  "nano-banana-2",
+  "nano-banana-pro",
+  "gemini-3.1-pro",
 ]);
 const DEFAULT_REGION = "beijing";
 const DEFAULT_DECORATION_LEVEL = "medium";
@@ -435,6 +440,7 @@ function installWorkflowRoutes(app, deps) {
     resolveRegion,
     parseJsonResponse,
     requestGeminiJson,
+    requestGrsaiGenerate,
     normalizeGeminiGenerateResponse,
     buildGeminiModelUrl,
     normalizeGeminiAspectRatio,
@@ -1812,6 +1818,7 @@ function getAiProcessingModeLabel(value) {
       apiKey,
       googleApiKey,
       region,
+      grsaiHost,
       imageModel,
       jobId,
       pageId,
@@ -1826,11 +1833,12 @@ function getAiProcessingModeLabel(value) {
 
     const selectedImageModel = String(imageModel || WORKFLOW_IMAGE_MODEL).trim() || WORKFLOW_IMAGE_MODEL;
     const useGemini = GEMINI_WORKFLOW_IMAGE_MODELS.has(selectedImageModel);
+    const useGrsai = GRSAI_WORKFLOW_IMAGE_MODELS.has(selectedImageModel);
 
-    if (useGemini && !googleApiKey) {
+    if ((useGemini || useGrsai) && !googleApiKey) {
       return res.status(400).json({ code: "MissingGoogleApiKey", message: "请先填写 Google API Key。" });
     }
-    if (!useGemini && !apiKey) {
+    if (!useGemini && !useGrsai && !apiKey) {
       return res.status(400).json({ code: "MissingApiKey", message: "请先填写 DashScope / Qwen API Key。" });
     }
 
@@ -1902,6 +1910,42 @@ function getAiProcessingModeLabel(value) {
 
         responsePayload = await normalizeGeminiGenerateResponse(parsed.data, selectedImageModel);
         page.promptTrace.finalImage.searchMetadata = extractGeminiSearchMetadata(parsed.data);
+        images = (responsePayload.output?.choices?.[0]?.message?.content || [])
+          .filter((item) => item.type === "image" && item.image)
+          .map((item) => item.image);
+      } else if (useGrsai) {
+        const content = [{ text: finalPrompt }];
+        if (parsedCanvasImage) {
+          content.push({ image: String(canvasImage || "").trim() });
+        }
+
+        const grsaiPayload = {
+          model: selectedImageModel,
+          input: {
+            messages: [
+              {
+                role: "user",
+                content,
+              },
+            ],
+          },
+          parameters: {
+            size: size || "2K",
+            n: 1,
+          },
+        };
+        if (String(seed || "").trim()) {
+          grsaiPayload.parameters.seed = Number(seed);
+        }
+
+        responsePayload = await requestGrsaiGenerate({
+          apiKey: googleApiKey,
+          model: selectedImageModel,
+          payload: grsaiPayload,
+          slideAspect,
+          size,
+          host: grsaiHost,
+        });
         images = (responsePayload.output?.choices?.[0]?.message?.content || [])
           .filter((item) => item.type === "image" && item.image)
           .map((item) => item.image);

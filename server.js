@@ -30,10 +30,19 @@ const upload = multer({
 const REGION_MAP = {
   beijing: "https://dashscope.aliyuncs.com",
 };
+const GRSAI_HOSTS = {
+  domestic: "https://grsai.dakka.com.cn",
+  overseas: "https://grsaiapi.com",
+};
 const GEMINI_IMAGE_MODELS = new Set([
   "gemini-3.1-flash-image-preview",
   "gemini-3-pro-image-preview",
   "gemini-2.5-flash-image",
+]);
+const GRSAI_IMAGE_MODELS = new Set([
+  "nano-banana-2",
+  "nano-banana-pro",
+  "gemini-3.1-pro",
 ]);
 const SUPPORTED_GEMINI_ASPECTS = new Set(["1:1", "4:3", "16:9", "3:4", "9:16"]);
 
@@ -57,6 +66,20 @@ function resolveRegion(region) {
 
 function isGeminiImageModel(model) {
   return GEMINI_IMAGE_MODELS.has(String(model || "").trim());
+}
+
+function isGrsaiImageModel(model) {
+  return GRSAI_IMAGE_MODELS.has(String(model || "").trim());
+}
+
+function isHostedImageModel(model) {
+  return isGeminiImageModel(model) || isGrsaiImageModel(model);
+}
+
+function resolveGrsaiHost(host) {
+  const value = String(host || process.env.GRSAI_HOST || "domestic").trim();
+  if (/^https?:\/\//i.test(value)) return value.replace(/\/+$/, "");
+  return (GRSAI_HOSTS[value] || GRSAI_HOSTS.domestic).replace(/\/+$/, "");
 }
 
 function extensionToMimeType(extension) {
@@ -327,6 +350,18 @@ function buildGeminiModelUrl(model) {
   return `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}`;
 }
 
+function buildGrsaiModelUrl(model, host) {
+  return `${resolveGrsaiHost(host)}/v1beta/models/${encodeURIComponent(model)}`;
+}
+
+function buildGrsaiDrawUrl(host) {
+  return `${resolveGrsaiHost(host)}/v1/draw/nano-banana`;
+}
+
+function buildGrsaiResultUrl(host) {
+  return `${resolveGrsaiHost(host)}/v1/draw/result`;
+}
+
 async function requestJsonViaFetch({ url, method = "POST", headers = {}, body }) {
   const response = await fetch(url, {
     method,
@@ -341,6 +376,12 @@ async function requestGeminiJson(request) {
 }
 
 async function normalizeGeminiGenerateResponse(data, model) {
+  if (Array.isArray(data?.results)) {
+    return normalizeGrsaiDrawResponse(data, model);
+  }
+  if (Array.isArray(data?.data?.results)) {
+    return normalizeGrsaiDrawResponse(data.data, model);
+  }
   const candidate = Array.isArray(data?.candidates) ? data.candidates[0] : null;
   const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
   const requestId = String(data?.responseId || data?.response_id || crypto.randomUUID()).trim();
@@ -354,16 +395,23 @@ async function normalizeGeminiGenerateResponse(data, model) {
     }
 
     const inlineData = part?.inlineData || part?.inline_data;
-    if (!inlineData?.data) continue;
-    imageIndex += 1;
-    const mimeType = inlineData.mimeType || inlineData.mime_type || "image/png";
-    const saved = await saveGeneratedBufferToFile(Buffer.from(inlineData.data, "base64"), {
-      prefix: "gemini",
-      requestId,
-      index: imageIndex,
-      extension: pickExtensionFromMimeType(mimeType),
-    });
-    content.push({ type: "image", image: saved.localUrl });
+    if (inlineData?.data) {
+      imageIndex += 1;
+      const mimeType = inlineData.mimeType || inlineData.mime_type || "image/png";
+      const saved = await saveGeneratedBufferToFile(Buffer.from(inlineData.data, "base64"), {
+        prefix: "gemini",
+        requestId,
+        index: imageIndex,
+        extension: pickExtensionFromMimeType(mimeType),
+      });
+      content.push({ type: "image", image: saved.localUrl });
+      continue;
+    }
+
+    const fileUri = part?.fileData?.fileUri || part?.file_data?.file_uri;
+    if (typeof fileUri === "string" && fileUri.trim()) {
+      content.push({ type: "image", image: fileUri.trim() });
+    }
   }
 
   return {
@@ -381,6 +429,136 @@ async function normalizeGeminiGenerateResponse(data, model) {
       ],
     },
   };
+}
+
+function normalizeGrsaiDrawResponse(data, model) {
+  const results = Array.isArray(data?.results) ? data.results : [];
+  const content = [];
+  results.forEach((item) => {
+    if (typeof item?.content === "string" && item.content.trim()) {
+      content.push({ type: "text", text: item.content.trim() });
+    }
+    if (typeof item?.url === "string" && item.url.trim()) {
+      content.push({ type: "image", image: item.url.trim() });
+    }
+  });
+  return {
+    request_id: String(data?.id || crypto.randomUUID()),
+    provider: "grsai",
+    model,
+    usage: null,
+    output: {
+      choices: [
+        {
+          message: {
+            content,
+          },
+        },
+      ],
+    },
+    raw: data,
+  };
+}
+
+function extractPromptAndImagesFromPayload(payload) {
+  const texts = [];
+  const urls = [];
+  const messages = Array.isArray(payload?.input?.messages) ? payload.input.messages : [];
+  messages.forEach((message) => {
+    const content = Array.isArray(message?.content) ? message.content : [];
+    content.forEach((item) => {
+      if (typeof item?.text === "string" && item.text.trim()) texts.push(item.text.trim());
+      if (typeof item?.image === "string" && item.image.trim()) urls.push(item.image.trim());
+    });
+  });
+  return {
+    prompt: texts.join("\n\n").trim(),
+    urls,
+  };
+}
+
+async function requestGrsaiGenerate({ apiKey, model, payload, slideAspect, size, host }) {
+  const geminiBody = await buildGeminiGenerationBody({ payload, slideAspect });
+  const compatible = await requestJsonViaFetch({
+    method: "POST",
+    url: `${buildGrsaiModelUrl(model, host)}:generateContent`,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+      "x-goog-api-key": apiKey,
+    },
+    body: JSON.stringify(geminiBody),
+  });
+  const compatibleHasResult = Array.isArray(compatible.data?.candidates)
+    || Array.isArray(compatible.data?.results)
+    || Array.isArray(compatible.data?.data?.results);
+  if (compatible.ok && compatibleHasResult) {
+    return normalizeGeminiGenerateResponse(compatible.data, model);
+  }
+
+  const fallback = extractPromptAndImagesFromPayload(payload);
+  if (!fallback.prompt) {
+    const error = new Error("Grsai 请求缺少提示词。");
+    error.status = compatible.status || 500;
+    error.details = compatible.data;
+    throw error;
+  }
+
+  const draw = await requestJsonViaFetch({
+    method: "POST",
+    url: buildGrsaiDrawUrl(host),
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      prompt: fallback.prompt,
+      aspectRatio: normalizeGeminiAspectRatio(slideAspect, size),
+      imageSize: normalizeGeminiImageSize(size || payload?.parameters?.size),
+      urls: fallback.urls,
+      webHook: "-1",
+      shutProgress: false,
+    }),
+  });
+  if (!draw.ok || draw.data?.code) {
+    const error = new Error(draw.data?.msg || draw.data?.message || compatible.data?.message || "Grsai 生图请求失败。");
+    error.status = draw.status || compatible.status || 500;
+    error.details = { compatible: compatible.data, draw: draw.data };
+    throw error;
+  }
+
+  const taskId = draw.data?.data?.id || draw.data?.id;
+  if (!taskId) {
+    return normalizeGrsaiDrawResponse(draw.data?.data || draw.data, model);
+  }
+
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, attempt < 3 ? 1000 : 2000));
+    const result = await requestJsonViaFetch({
+      method: "POST",
+      url: buildGrsaiResultUrl(host),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ id: taskId }),
+    });
+    if (!result.ok || result.data?.code) {
+      continue;
+    }
+    const data = result.data?.data || result.data;
+    if (data?.status === "succeeded") return normalizeGrsaiDrawResponse(data, model);
+    if (data?.status === "failed") {
+      const error = new Error(data.error || data.failure_reason || "Grsai 生图失败。");
+      error.details = data;
+      throw error;
+    }
+  }
+
+  const timeout = new Error("Grsai 生图任务仍在运行，请稍后重试。");
+  timeout.details = { taskId };
+  throw timeout;
 }
 
 function getDefaultLibraryDoc() {
@@ -1014,10 +1192,13 @@ app.post("/api/library", async (req, res) => {
 
 installWorkflowRoutes(app, {
   resolveRegion,
+  resolveGrsaiHost,
   parseJsonResponse,
   requestGeminiJson,
+  requestGrsaiGenerate,
   normalizeGeminiGenerateResponse,
   buildGeminiModelUrl,
+  buildGrsaiModelUrl,
   normalizeGeminiAspectRatio,
   normalizeGeminiImageSize,
   parseDataUrl,
@@ -1025,7 +1206,7 @@ installWorkflowRoutes(app, {
 });
 
 app.post("/api/test-image-key", async (req, res) => {
-  const { apiKey, googleApiKey, region, model } = req.body || {};
+  const { apiKey, googleApiKey, region, model, grsaiHost } = req.body || {};
 
   if (!model) {
     return res.status(400).json({
@@ -1034,12 +1215,45 @@ app.post("/api/test-image-key", async (req, res) => {
     });
   }
 
-  if (isGeminiImageModel(model)) {
+  if (isHostedImageModel(model)) {
     if (!googleApiKey) {
       return res.status(400).json({
         code: "MissingGoogleApiKey",
-        message: "请先填写 Google API Key。",
+        message: "请先填写 Nano Banana / Gemini API Key。",
       });
+    }
+
+    if (isGrsaiImageModel(model)) {
+      try {
+        const parsed = await requestJsonViaFetch({
+          method: "POST",
+          url: buildGrsaiResultUrl(grsaiHost),
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${googleApiKey}`,
+          },
+          body: JSON.stringify({ id: "codex-health-check" }),
+        });
+        const serviceCode = Number(parsed.data?.code);
+        if (!parsed.ok || (Number.isFinite(serviceCode) && serviceCode !== 0 && serviceCode !== -22)) {
+          return res.status(parsed.ok ? 400 : parsed.status).json({
+            code: "GrsaiKeyTestFailed",
+            message: parsed.data?.msg || parsed.data?.message || "Grsai API Key 测试失败。",
+            details: parsed.data,
+          });
+        }
+        return res.json({
+          ok: true,
+          provider: "grsai",
+          message: `Grsai API 可访问，模型 ${model} 将使用 ${resolveGrsaiHost(grsaiHost)}。`,
+          details: parsed.data,
+        });
+      } catch (error) {
+        return res.status(500).json({
+          code: "GrsaiKeyTestFailed",
+          message: error.message || "Grsai API Key 测试失败。",
+        });
+      }
     }
 
     try {
@@ -1111,20 +1325,32 @@ app.post("/api/test-image-key", async (req, res) => {
 });
 
 app.post("/api/generate", async (req, res, next) => {
-  const { googleApiKey, slideAspect, payload } = req.body || {};
+  const { googleApiKey, slideAspect, payload, grsaiHost } = req.body || {};
 
-  if (!isGeminiImageModel(payload?.model)) {
+  if (!isHostedImageModel(payload?.model)) {
     return next();
   }
 
   if (!googleApiKey) {
     return res.status(400).json({
       code: "MissingGoogleApiKey",
-      message: "请先填写 Google API Key，再调用 Nano Banana。",
+      message: "请先填写 Nano Banana / Gemini API Key，再调用生图模型。",
     });
   }
 
   try {
+    if (isGrsaiImageModel(payload.model)) {
+      const normalized = await requestGrsaiGenerate({
+        apiKey: googleApiKey,
+        model: payload.model,
+        payload,
+        slideAspect,
+        size: payload?.parameters?.size,
+        host: grsaiHost,
+      });
+      return res.json(normalized);
+    }
+
     const geminiBody = await buildGeminiGenerationBody({ payload, slideAspect });
     const parsed = await requestGeminiJson({
       method: "POST",

@@ -1,10 +1,15 @@
 const STORAGE_KEY = "ppt-studio-v2-mainline";
 const DEFAULT_REGION = "beijing";
-const PPT_MODEL = "gemini-3.1-flash-image-preview";
+const PPT_MODEL = "nano-banana-2";
 const GEMINI_WORKFLOW_MODELS = new Set([
   "gemini-3.1-flash-image-preview",
   "gemini-3-pro-image-preview",
   "gemini-2.5-flash-image",
+]);
+const GRSAI_WORKFLOW_MODELS = new Set([
+  "nano-banana-2",
+  "nano-banana-pro",
+  "gemini-3.1-pro",
 ]);
 const EDIT_MODEL = "wan2.7-image-pro";
 const MAX_REVISE_BOXES = 2;
@@ -98,6 +103,7 @@ const state = {
     googleApiKey: "",
     workflowImageModel: PPT_MODEL,
     enableGeminiGoogleSearch: false,
+    grsaiHost: "domestic",
     region: DEFAULT_REGION,
     slideAspect: "16:9",
     outputSize: "2K",
@@ -259,6 +265,7 @@ function cacheElements() {
     "workflowImageModel",
     "enableGeminiGoogleSearch",
     "geminiGoogleSearchField",
+    "grsaiHost",
     "region",
     "slideAspect",
     "outputSize",
@@ -560,6 +567,7 @@ function applyStateToUi() {
   if (el.enableGeminiGoogleSearch) {
     el.enableGeminiGoogleSearch.checked = Boolean(state.settings.enableGeminiGoogleSearch);
   }
+  if (el.grsaiHost) el.grsaiHost.value = state.settings.grsaiHost || "domestic";
   el.region.value = state.settings.region || DEFAULT_REGION;
   el.slideAspect.value = state.settings.slideAspect || "16:9";
   el.outputSize.value = state.settings.outputSize || "2K";
@@ -692,10 +700,18 @@ function usingGeminiWorkflowModel() {
   return GEMINI_WORKFLOW_MODELS.has(getCurrentWorkflowImageModel());
 }
 
+function usingHostedWorkflowModel() {
+  const model = getCurrentWorkflowImageModel();
+  return GEMINI_WORKFLOW_MODELS.has(model) || GRSAI_WORKFLOW_MODELS.has(model);
+}
+
 function syncWorkflowModelOptions() {
   if (!el.workflowImageModel) return;
   const currentValue = state.settings.workflowImageModel || el.workflowImageModel.value || PPT_MODEL;
   el.workflowImageModel.innerHTML = [
+    `<option value="nano-banana-2">Grsai Nano Banana 2</option>`,
+    `<option value="nano-banana-pro">Grsai Nano Banana Pro</option>`,
+    `<option value="gemini-3.1-pro">Grsai Gemini 3.1 Pro</option>`,
     `<option value="gemini-3.1-flash-image-preview">Nano Banana 2</option>`,
     `<option value="gemini-3-pro-image-preview">Nano Banana Pro</option>`,
     `<option value="gemini-2.5-flash-image">Nano Banana</option>`,
@@ -2102,6 +2118,10 @@ function bindEvents() {
     syncGeminiSearchControls();
     saveState();
   });
+  el.grsaiHost?.addEventListener("change", () => {
+    state.settings.grsaiHost = el.grsaiHost.value || "domestic";
+    saveState();
+  });
   el.enableGeminiGoogleSearch?.addEventListener("change", () => {
     state.settings.enableGeminiGoogleSearch = Boolean(el.enableGeminiGoogleSearch.checked && usingGeminiWorkflowModel());
     saveState();
@@ -2380,12 +2400,12 @@ async function batchGenerateReadyPages() {
   if (!job?.pages?.length) return;
 
   const selectedImageModel = getCurrentWorkflowImageModel();
-  if (usingGeminiWorkflowModel() && !state.settings.googleApiKey) {
-    setStatus("请先填写 Google API Key。", "error");
+  if (usingHostedWorkflowModel() && !state.settings.googleApiKey) {
+    setStatus("请先填写 Nano Banana / Gemini API Key。", "error");
     switchTab("settings");
     return;
   }
-  if (!usingGeminiWorkflowModel() && !state.settings.apiKey) {
+  if (!usingHostedWorkflowModel() && !state.settings.apiKey) {
     setStatus("请先填写 DashScope / Qwen API Key。", "error");
     switchTab("settings");
     return;
@@ -2409,6 +2429,7 @@ async function batchGenerateReadyPages() {
         body: JSON.stringify({
           apiKey: state.settings.apiKey,
           googleApiKey: state.settings.googleApiKey,
+          grsaiHost: state.settings.grsaiHost,
           region: state.settings.region,
           imageModel: selectedImageModel,
           jobId: state.workflowJobId,
@@ -2450,6 +2471,7 @@ async function testApiKeys() {
   state.settings.apiKey = el.apiKey.value.trim();
   state.settings.googleApiKey = el.googleApiKey.value.trim();
   state.settings.workflowImageModel = el.workflowImageModel.value || PPT_MODEL;
+  state.settings.grsaiHost = el.grsaiHost?.value || "domestic";
   state.settings.region = el.region.value;
   state.settings.slideAspect = el.slideAspect.value;
   state.settings.outputSize = el.outputSize.value;
@@ -2463,7 +2485,7 @@ async function testApiKeys() {
   try {
     const tasks = [];
     const selectedWorkflowModel = getCurrentWorkflowImageModel();
-    if (state.settings.googleApiKey && GEMINI_WORKFLOW_MODELS.has(selectedWorkflowModel)) {
+    if (state.settings.googleApiKey && (GEMINI_WORKFLOW_MODELS.has(selectedWorkflowModel) || GRSAI_WORKFLOW_MODELS.has(selectedWorkflowModel))) {
       tasks.push(fetch("/api/test-image-key", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2471,6 +2493,7 @@ async function testApiKeys() {
         body: JSON.stringify({
           apiKey: state.settings.apiKey,
           googleApiKey: state.settings.googleApiKey,
+          grsaiHost: state.settings.grsaiHost,
           region: state.settings.region,
           model: selectedWorkflowModel,
         }),
@@ -2873,12 +2896,12 @@ async function generateCurrentPage() {
   const currentPageNumber = page.pageNumber;
 
   const selectedImageModel = getCurrentWorkflowImageModel();
-  if (usingGeminiWorkflowModel() && !state.settings.googleApiKey) {
-    setStatus("\u8bf7\u5148\u586b\u5199 Google API Key\u3002", "error");
+  if (usingHostedWorkflowModel() && !state.settings.googleApiKey) {
+    setStatus("\u8bf7\u5148\u586b\u5199 Nano Banana / Gemini API Key\u3002", "error");
     switchTab("settings");
     return;
   }
-  if (!usingGeminiWorkflowModel() && !state.settings.apiKey) {
+  if (!usingHostedWorkflowModel() && !state.settings.apiKey) {
     setStatus("\u8bf7\u5148\u586b\u5199 DashScope / Qwen API Key\u3002", "error");
     switchTab("settings");
     return;
@@ -2900,6 +2923,7 @@ async function generateCurrentPage() {
       body: JSON.stringify({
         apiKey: state.settings.apiKey,
         googleApiKey: state.settings.googleApiKey,
+        grsaiHost: state.settings.grsaiHost,
         region: state.settings.region,
         imageModel: selectedImageModel,
         jobId: state.workflowJobId,
