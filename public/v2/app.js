@@ -1824,6 +1824,7 @@ function renderReferenceFiles() {
         <span class="meta-pill">${escapeHtml(file.category || "unknown")}</span>
         <span class="meta-pill">${escapeHtml(file.parseStatus || "unknown")}</span>
       </div>
+      ${file.previewUrl ? `<img class="file-preview-image" src="${escapeHtml(file.previewUrl)}" alt="${escapeHtml(file.name)}" />` : ""}
       ${file.previewText ? `<details class="trace-details"><summary>预览文本</summary><pre>${escapeHtml(file.previewText)}</pre></details>` : ""}
     </div>
   `).join("");
@@ -1882,6 +1883,7 @@ async function generateTheme() {
         themeName: state.themeName,
         decorationLevel: state.decorationLevel,
         preferences: state.preferences,
+        referenceFiles: state.parsedFiles,
       }),
     });
     state.themeDefinition = data.themeDefinition;

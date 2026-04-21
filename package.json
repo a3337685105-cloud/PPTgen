@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "start:windows": "start-app.bat",
     "clean:artifacts": "node scripts/clean-artifacts.js",
     "clean:artifacts:all": "node scripts/clean-artifacts.js --all-generated"
   },
@@ -21,6 +22,7 @@
     "jszip": "^3.10.1",
     "multer": "^2.1.1",
     "pdf-parse": "^2.4.5",
+    "pptxgenjs": "^4.0.1",
     "xlsx": "^0.18.5"
   }
 }

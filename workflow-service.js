@@ -440,6 +440,7 @@ function installWorkflowRoutes(app, deps) {
     normalizeGeminiAspectRatio,
     normalizeGeminiImageSize,
     parseDataUrl,
+    loadReferenceAssetAsDataUrl,
   } = deps;
 
   async function callAssistant(apiKey, region, payload) {
@@ -460,13 +461,20 @@ function installWorkflowRoutes(app, deps) {
     return { data: parsed.data, text };
   }
 
-  function buildAssistantPayload(systemPrompt, userPrompt) {
+  function buildAssistantPayload(systemPrompt, userPrompt, options = {}) {
+    const imageDataUrls = Array.isArray(options.imageDataUrls) ? options.imageDataUrls.filter(Boolean) : [];
     return {
       model: WORKFLOW_ASSISTANT_MODEL,
       input: {
         messages: [
           { role: "system", content: [{ text: systemPrompt }] },
-          { role: "user", content: [{ text: userPrompt }] },
+          {
+            role: "user",
+            content: [
+              ...imageDataUrls.map((image) => ({ image })),
+              { text: userPrompt },
+            ],
+          },
         ],
       },
       parameters: {
@@ -477,8 +485,8 @@ function installWorkflowRoutes(app, deps) {
     };
   }
 
-  async function runAssistantJsonObject(apiKey, region, systemPrompt, userPrompt, moduleName) {
-    const payload = buildAssistantPayload(systemPrompt, userPrompt);
+  async function runAssistantJsonObject(apiKey, region, systemPrompt, userPrompt, moduleName, options = {}) {
+    const payload = buildAssistantPayload(systemPrompt, userPrompt, options);
     const { text } = await callAssistant(apiKey, region, payload);
     const parsed = safeParseJsonObject(text);
     if (!parsed || typeof parsed !== "object") {
@@ -827,14 +835,32 @@ function getAiProcessingModeLabel(value) {
           id: String(item?.id || crypto.randomUUID()),
           name: String(item?.name || "").trim(),
           category: String(item?.category || "").trim(),
+          size: Number(item?.size || 0),
           parseStatus: String(item?.parseStatus || "").trim(),
           parseNote: String(item?.parseNote || "").trim(),
           extractedText: String(item?.extractedText || "").trim(),
           previewText: String(item?.previewText || "").trim(),
+          assetId: String(item?.assetId || "").trim(),
+          assetFileName: String(item?.assetFileName || "").trim(),
+          previewUrl: String(item?.previewUrl || "").trim(),
+          mimeType: String(item?.mimeType || "").trim(),
           includeInSplit: item?.includeInSplit !== false,
         }))
         .filter((item) => item.name)
       : [];
+  }
+
+  async function loadReferenceImageDataUrls(referenceFiles = []) {
+    if (typeof loadReferenceAssetAsDataUrl !== "function") return [];
+    const imageFiles = referenceFiles
+      .filter((file) => file.category === "image" && (file.assetFileName || file.previewUrl) && (!file.size || file.size <= 8 * 1024 * 1024))
+      .slice(0, 6);
+    const loaded = await Promise.allSettled(
+      imageFiles.map((file) => loadReferenceAssetAsDataUrl(file)),
+    );
+    return loaded
+      .filter((item) => item.status === "fulfilled" && item.value)
+      .map((item) => item.value);
   }
 
   function buildReferenceDigestInput(mainText, referenceFiles) {
@@ -1128,7 +1154,7 @@ function getAiProcessingModeLabel(value) {
     return "";
   }
 
-  async function runThemeDefinition(apiKey, region, themeName, decorationLevel, preferences) {
+  async function runThemeDefinition(apiKey, region, themeName, decorationLevel, preferences, referenceFiles = []) {
     const systemPrompt = [
       "你是一位专注 PPT 视觉表达的高级艺术总监及 UI/UX 专家。",
 "你的任务是为顶级生图大模型 Nano Banana 2 撰写极具画面感、物理质感的【中文】系统级提示词。",
@@ -1192,7 +1218,8 @@ function getAiProcessingModeLabel(value) {
       "{\"displaySummaryZh\":\"...\",\"modelPrompt\":\"...\",\"basic\":\"...\",\"cover\":\"...\",\"catalog\":\"...\",\"chapter\":\"...\",\"content\":\"...\",\"data\":\"...\"}",
     ].join("\n\n");
 
-    const result = await runAssistantJsonObject(apiKey, region, effectiveSystemPrompt, effectiveUserPrompt, "主题模板");
+    const imageDataUrls = await loadReferenceImageDataUrls(referenceFiles);
+    const result = await runAssistantJsonObject(apiKey, region, effectiveSystemPrompt, effectiveUserPrompt, "主题模板", { imageDataUrls });
     return {
       themeDefinition: normalizeThemeDefinition(result.parsed, themeName, decorationLevel, preferences),
       trace: { systemPrompt: effectiveSystemPrompt, userPrompt: effectiveUserPrompt, responseText: result.text },
@@ -1224,7 +1251,8 @@ function getAiProcessingModeLabel(value) {
       "{\"summary\":\"...\",\"usableFacts\":[\"...\"],\"cautions\":[\"...\"]}",
     ].join("\n\n");
 
-    const result = await runAssistantJsonObject(apiKey, region, systemPrompt, userPrompt, "参考材料摘要");
+    const imageDataUrls = await loadReferenceImageDataUrls(referenceFiles);
+    const result = await runAssistantJsonObject(apiKey, region, systemPrompt, userPrompt, "参考材料摘要", { imageDataUrls });
     return {
       digest: {
         summary: stringifyStructuredField(result.parsed.summary || ""),
@@ -1544,7 +1572,7 @@ function getAiProcessingModeLabel(value) {
   }
 
   app.post("/api/workflow/theme", async (req, res) => {
-    const { apiKey, region, themeName, decorationLevel, preferences } = req.body || {};
+    const { apiKey, region, themeName, decorationLevel, preferences, referenceFiles } = req.body || {};
     if (!apiKey) {
       return res.status(400).json({ code: "MissingApiKey", message: "请先填写 DashScope / Qwen API Key。" });
     }
@@ -1554,12 +1582,14 @@ function getAiProcessingModeLabel(value) {
 
     try {
       const normalizedPreferences = normalizePreferences(preferences);
+      const normalizedReferenceFiles = normalizeReferenceFiles(referenceFiles);
       const result = await runThemeDefinition(
         apiKey,
         region || DEFAULT_REGION,
         String(themeName || "").trim(),
         decorationLevel,
         normalizedPreferences,
+        normalizedReferenceFiles,
       );
       return res.json({
         ok: true,

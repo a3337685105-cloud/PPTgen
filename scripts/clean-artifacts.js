@@ -10,6 +10,7 @@ const cutoff = Date.now() - keepDays * 24 * 60 * 60 * 1000;
 const targetsInsideRoot = [
   path.join(rootDir, "tmp"),
   path.join(rootDir, "data", "ppt-guide-extract"),
+  path.join(rootDir, "data", "reference-assets"),
 ];
 
 function removePath(targetPath) {

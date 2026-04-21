@@ -1,69 +1,56 @@
-# PPT Image Studio
+# PPTgen V2 Studio
 
-一个面向 PPT 制作与改图的本地 Web 小工具，调用阿里云 DashScope 的万相 2.7 图像接口，并接入 Qwen 3.6 Plus 做提示词助手。
+Local PPT workflow studio for turning long-form content and reference files into slide-ready image pages, then exporting a PowerPoint deck.
 
-支持能力：
+## Requirements
 
-- PPT 版式区域规划画布
-- 常用 PPT 模板区域预设
-- 长文本拆分页
-- 纸艺主题 / 水墨主题逐页提示词生成
-- 按拆分页结果逐页调用万相出图
-- 文生图
-- 多图参考生成
-- 图像编辑
-- 交互式框选编辑（`bbox_list`）
-- 在已有 PPT 图片上选区定点改图
-- 组图生成（`enable_sequential`）
-- Qwen 3.6 Plus 提示词助手
-- 基于当前图片与区域的一键改写提示词
-- 为后续多页生成准备的多页视觉草案输出
-- HTTP 同步调用
-- HTTP 异步创建任务与轮询结果
-- 页面内输入 API Key、地域、模型和高级参数
-- 结果图片下载到本地 `generated-images`
+- Windows 10/11
+- Node.js 18+; Node.js 20+ is recommended
+- DashScope / Qwen API key for workflow planning and text reasoning
+- Google Gemini API key for Nano Banana image generation
 
-## 启动
+## Start
 
 ```bash
 npm install
 npm start
 ```
 
-默认启动地址：
+Open:
 
 ```text
-http://localhost:3000
+http://localhost:3000/
 ```
 
-Windows 下一键启动：
+On Windows, you can also double-click:
 
 ```text
-双击 start-app.bat
+start-app.bat
 ```
 
-## 使用说明
+The root route redirects to the active V2 UI at `/v2/index.html`.
 
-1. 打开页面后填写 API Key。
-2. 选择地域：
-   - `singapore` 对应 `https://dashscope-intl.aliyuncs.com`
-   - `beijing` 对应 `https://dashscope.aliyuncs.com`
-3. 选择同步或异步模式。
-4. 输入提示词。
-5. 如果你在做 PPT 页面，先在“PPT 版式区域规划”里画出标题区、主视觉区和留白区，或直接应用模板。
-6. 如果是图像编辑、多图参考或框选编辑，上传本地图片或添加公网图片 URL。
-7. 如需生成或改写提示词，可在“千问提示词助手”中描述目标并一键生成建议。
-8. 如需做长内容转多页 PPT，可在“PPT 拆分页与主题生图”里粘贴整段文案，设置页数和主题，先生成逐页提示词，再单页或批量逐页出图。
-9. 如需在已有 PPT 图上定点改图，先在“选区改图”里选中一张底图，再勾选“启用定点改图”，然后只在这张图上拖拽框区域。
-10. 点击“开始调用”，或在拆分页卡片里点击“生成本页”。
+## Active Features
 
-## 说明
+- V2 smart PPT workflow UI
+- Theme definition, content splitting, page preparation, single-page and batch image generation
+- Reference uploads for text, Markdown, JSON, HTML, XML, DOCX, PPTX, XLS/XLSX, PDF, and images
+- Image references are kept as visual context for the model; OCR is not performed
+- Local generated image cache in `generated-images/`
+- PPT export through the project dependency `pptxgenjs`
 
-- API Key 只保存在浏览器本地 `localStorage`，不会写入项目文件。
-- 本地上传图片会在浏览器中转成 Base64 后再发给后端代理。
-- 异步任务返回的 `task_id` 和生成图片 URL 都是临时数据，请及时保存。
-- 页面里的“下载到本地”会把生成结果保存到项目根目录的 `generated-images` 文件夹。
-- Qwen 助手默认使用 `qwen3.6-plus`，通过多模态接口调用，可同时参考文本、图片和 PPT 区域。
-- 启用定点改图时，所选底图会自动作为最后一张发送，其它上传图片将作为参考图保留在前面。
-- “PPT 拆分页与主题生图”参考了你提供的 n8n 主工作流思路：先拆分页，再按页面类型拼接主题提示词，再逐页生图。
-- 当前没有接入视频相关工作流，只实现了 PPT 拆分页和图片生成部分。
+## Local Runtime Data
+
+These folders are runtime artifacts and should not be committed:
+
+- `generated-images/`
+- `exports/`
+- `data/studio-library.json`
+- `data/reference-assets/`
+- `tmp/`
+
+Clean old local artifacts with:
+
+```bash
+npm run clean:artifacts
+```

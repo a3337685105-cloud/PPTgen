@@ -693,6 +693,16 @@ input:focus, select:focus, textarea:focus {
   margin-top: 6px;
 }
 
+.file-preview-image {
+  display: block;
+  width: min(220px, 100%);
+  max-height: 140px;
+  margin-top: 10px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid rgba(148, 163, 184, 0.26);
+}
+
 .meta-pill,
 .status-pill,
 .risk-pill {

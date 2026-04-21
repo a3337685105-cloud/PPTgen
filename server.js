@@ -1,13 +1,11 @@
-const crypto = require("crypto");
+﻿const crypto = require("crypto");
 const fs = require("fs");
 const fsp = require("fs/promises");
-const os = require("os");
 const path = require("path");
-const { pathToFileURL } = require("url");
-const { spawn } = require("child_process");
 const express = require("express");
 const multer = require("multer");
 const JSZip = require("jszip");
+const PptxGenJS = require("pptxgenjs");
 const XLSX = require("xlsx");
 const pdfParse = require("pdf-parse");
 const { installWorkflowRoutes } = require("./workflow-service");
@@ -19,6 +17,7 @@ const PUBLIC_DIR = path.join(ROOT_DIR, "public");
 const GENERATED_DIR = path.join(ROOT_DIR, "generated-images");
 const EXPORTS_DIR = path.join(ROOT_DIR, "exports");
 const DATA_DIR = path.join(ROOT_DIR, "data");
+const REFERENCE_ASSETS_DIR = path.join(DATA_DIR, "reference-assets");
 const LIBRARY_DOC_PATH = path.join(DATA_DIR, "studio-library.json");
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -41,26 +40,16 @@ const SUPPORTED_GEMINI_ASPECTS = new Set(["1:1", "4:3", "16:9", "3:4", "9:16"]);
 fs.mkdirSync(GENERATED_DIR, { recursive: true });
 fs.mkdirSync(EXPORTS_DIR, { recursive: true });
 fs.mkdirSync(DATA_DIR, { recursive: true });
+fs.mkdirSync(REFERENCE_ASSETS_DIR, { recursive: true });
 
 app.use(express.json({ limit: "50mb" }));
+app.get("/", (_req, res) => {
+  res.redirect(302, "/v2/index.html");
+});
 app.use(express.static(PUBLIC_DIR));
 app.use("/generated-images", express.static(GENERATED_DIR));
 app.use("/exports", express.static(EXPORTS_DIR));
-
-const ARTIFACT_TOOL_MODULE_URL = pathToFileURL(path.join(
-  os.homedir(),
-  ".cache",
-  "codex-runtimes",
-  "codex-primary-runtime",
-  "dependencies",
-  "node",
-  "node_modules",
-  "@oai",
-  "artifact-tool",
-  "dist",
-  "artifact_tool.mjs",
-)).href;
-let artifactToolModulePromise = null;
+app.use("/reference-assets", express.static(REFERENCE_ASSETS_DIR));
 
 function resolveRegion(region) {
   return REGION_MAP[region] || REGION_MAP.beijing;
@@ -75,6 +64,7 @@ function extensionToMimeType(extension) {
   if (normalized === ".jpg" || normalized === ".jpeg") return "image/jpeg";
   if (normalized === ".webp") return "image/webp";
   if (normalized === ".bmp") return "image/bmp";
+  if (normalized === ".gif") return "image/gif";
   return "image/png";
 }
 
@@ -83,6 +73,7 @@ function pickExtensionFromMimeType(mimeType) {
   if (mime.includes("jpeg") || mime.includes("jpg")) return ".jpg";
   if (mime.includes("webp")) return ".webp";
   if (mime.includes("bmp")) return ".bmp";
+  if (mime.includes("gif")) return ".gif";
   return ".png";
 }
 
@@ -188,8 +179,8 @@ async function loadGeminiImageSource(source) {
   throw new Error("Gemini 目前只支持 data URL、本地缓存图或 http(s) 图片链接作为输入。");
 }
 
-function bufferToArrayBuffer(buffer) {
-  return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+function toDataUrl(buffer, mimeType) {
+  return `data:${mimeType || "application/octet-stream"};base64,${buffer.toString("base64")}`;
 }
 
 function getPptSlideSize(slideAspect) {
@@ -203,11 +194,50 @@ function getPptSlideSize(slideAspect) {
   }
 }
 
-async function loadArtifactToolModule() {
-  if (!artifactToolModulePromise) {
-    artifactToolModulePromise = import(ARTIFACT_TOOL_MODULE_URL);
+function getPptLayout(slideAspect) {
+  switch (String(slideAspect || "").trim()) {
+    case "4:3":
+      return { name: "PPTGEN_4_3", width: 10, height: 7.5 };
+    case "1:1":
+      return { name: "PPTGEN_1_1", width: 7.5, height: 7.5 };
+    default:
+      return { name: "PPTGEN_16_9", width: 13.333, height: 7.5 };
   }
-  return artifactToolModulePromise;
+}
+
+function toPptPosition(position, slideSize, layout) {
+  return {
+    x: (position.left / slideSize.width) * layout.width,
+    y: (position.top / slideSize.height) * layout.height,
+    w: (position.width / slideSize.width) * layout.width,
+    h: (position.height / slideSize.height) * layout.height,
+  };
+}
+
+async function saveReferenceImage(file) {
+  const extension = pickExtensionFromMimeType(file.mimetype || extensionToMimeType(path.extname(file.originalname)));
+  const assetId = crypto.randomUUID();
+  const fileName = `${assetId}${extension}`;
+  const targetPath = path.join(REFERENCE_ASSETS_DIR, fileName);
+  await fsp.mkdir(REFERENCE_ASSETS_DIR, { recursive: true });
+  await fsp.writeFile(targetPath, file.buffer);
+  return {
+    assetId,
+    fileName,
+    savedPath: targetPath,
+    previewUrl: `/reference-assets/${encodeURIComponent(fileName)}`,
+  };
+}
+
+async function loadReferenceAssetAsDataUrl(referenceFile) {
+  const fileName = String(referenceFile?.assetFileName || "").trim()
+    || (String(referenceFile?.previewUrl || "").startsWith("/reference-assets/")
+      ? decodeURIComponent(String(referenceFile.previewUrl).slice("/reference-assets/".length))
+      : "");
+  if (!fileName || fileName.includes("/") || fileName.includes("\\")) return "";
+  const targetPath = path.join(REFERENCE_ASSETS_DIR, fileName);
+  const buffer = await fsp.readFile(targetPath);
+  return toDataUrl(buffer, referenceFile?.mimeType || extensionToMimeType(path.extname(fileName)));
 }
 
 function normalizeExportText(value) {
@@ -220,11 +250,12 @@ function normalizeExportText(value) {
 
 function buildExportSlides(pages) {
   return (Array.isArray(pages) ? pages : []).map((page, index) => {
-    const title = normalizeExportText(page?.onscreenTitle || page?.pageTitle || `第${index + 1}页`).split("\n")[0].trim();
+    const fallbackTitle = `第 ${index + 1} 页`;
+    const title = normalizeExportText(page?.onscreenTitle || page?.pageTitle || fallbackTitle).split("\n")[0].trim();
     const body = normalizeExportText(page?.onscreenBody || page?.onscreenContent || page?.pageContent || "");
     return {
       pageNumber: Number(page?.pageNumber || index + 1),
-      title: title || `第${index + 1}页`,
+      title: title || fallbackTitle,
       body,
       imageUrl: String(page?.imageUrl || page?.baseImage || "").trim(),
     };
@@ -305,100 +336,7 @@ async function requestJsonViaFetch({ url, method = "POST", headers = {}, body })
   return parseJsonResponse(response);
 }
 
-async function requestJsonViaPowerShell({ url, method = "POST", headers = {}, body = "" }) {
-  await fsp.mkdir(DATA_DIR, { recursive: true });
-  const requestFile = path.join(DATA_DIR, `gemini-request-${crypto.randomUUID()}.json`);
-  const scriptFile = path.join(DATA_DIR, `gemini-request-${crypto.randomUUID()}.ps1`);
-
-  const script = [
-    "param([string]$RequestFile)",
-    "$ErrorActionPreference = 'Stop'",
-    "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
-    "$request = Get-Content -Raw -Encoding UTF8 $RequestFile | ConvertFrom-Json",
-    "$headers = @{}",
-    "if ($request.headers) {",
-    "  $request.headers.PSObject.Properties | ForEach-Object {",
-    "    $headers[$_.Name] = [string]$_.Value",
-    "  }",
-    "}",
-    "try {",
-    "  if ($request.body) {",
-    "    $response = Invoke-RestMethod -Method $request.method -Uri $request.url -Headers $headers -ContentType 'application/json; charset=utf-8' -Body ([string]$request.body)",
-    "  } else {",
-    "    $response = Invoke-RestMethod -Method $request.method -Uri $request.url -Headers $headers",
-    "  }",
-    "  @{ ok = $true; status = 200; data = $response } | ConvertTo-Json -Depth 100",
-    "} catch {",
-    "  $status = 500",
-    "  $content = ''",
-    "  if ($_.Exception.Response) {",
-    "    try { $status = [int]$_.Exception.Response.StatusCode } catch {}",
-    "    try {",
-    "      $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())",
-    "      $content = $reader.ReadToEnd()",
-    "      $reader.Close()",
-    "    } catch {}",
-    "  }",
-    "  if (-not $content) { $content = $_.Exception.Message }",
-    "  $parsed = $null",
-    "  try { $parsed = $content | ConvertFrom-Json } catch {}",
-    "  if ($parsed) {",
-    "    @{ ok = $false; status = $status; data = $parsed } | ConvertTo-Json -Depth 100",
-    "  } else {",
-    "    @{ ok = $false; status = $status; data = @{ message = [string]$content } } | ConvertTo-Json -Depth 100",
-    "  }",
-    "}",
-  ].join("\r\n");
-
-  await fsp.writeFile(requestFile, JSON.stringify({ url, method, headers, body }), "utf8");
-  await fsp.writeFile(scriptFile, script, "utf8");
-
-  try {
-    const result = await new Promise((resolve, reject) => {
-      const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptFile, requestFile], {
-        windowsHide: true,
-      });
-
-      let stdout = "";
-      let stderr = "";
-
-      child.stdout.on("data", (chunk) => {
-        stdout += chunk.toString("utf8");
-      });
-      child.stderr.on("data", (chunk) => {
-        stderr += chunk.toString("utf8");
-      });
-      child.on("error", reject);
-      child.on("close", (code) => {
-        if (code !== 0 && !stdout.trim()) {
-          reject(new Error(stderr.trim() || `PowerShell request failed with code ${code}.`));
-          return;
-        }
-
-        try {
-          resolve(JSON.parse(stdout.trim() || "{}"));
-        } catch (error) {
-          reject(new Error(stderr.trim() || stdout.trim() || error.message));
-        }
-      });
-    });
-    return result;
-  } finally {
-    await Promise.allSettled([
-      fsp.unlink(requestFile),
-      fsp.unlink(scriptFile),
-    ]);
-  }
-}
-
 async function requestGeminiJson(request) {
-  if (process.platform === "win32") {
-    try {
-      return await requestJsonViaPowerShell(request);
-    } catch (error) {
-      return requestJsonViaFetch(request);
-    }
-  }
   return requestJsonViaFetch(request);
 }
 
@@ -655,11 +593,15 @@ async function extractFileText(file) {
     };
   }
 
-  if ([".png", ".jpg", ".jpeg", ".bmp", ".gif"].includes(extension)) {
+  if ([".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"].includes(extension)) {
+    const saved = await saveReferenceImage(file);
     return {
       extractedText: "",
       parseStatus: "image",
       parseNote: "图片文件会作为视觉参考保留。",
+      assetId: saved.assetId,
+      assetFileName: saved.fileName,
+      previewUrl: saved.previewUrl,
     };
   }
 
@@ -693,7 +635,6 @@ async function extractFileText(file) {
     parseNote: "文件已接收，当前未自动提取正文。",
   };
 }
-
 function pickFileExtension(imageUrl, contentType) {
   const pathname = (() => {
     try {
@@ -1005,18 +946,18 @@ function buildHeuristicResearchQuery(pageTitle, pageContent) {
     if (value && !parts.includes(value)) parts.push(value);
   };
 
-  if (/智能窗|智能玻璃|调光玻璃|Smart Window|Smart Glass/i.test(text)) {
+  if (/鏅鸿兘绐梶鏅鸿兘鐜荤拑|璋冨厜鐜荤拑|Smart Window|Smart Glass/i.test(text)) {
     push("smart window");
     push("smart glass");
   }
-  if (/电致变色|electrochromic/i.test(text)) push("electrochromic");
-  if (/热致变色|thermochromic/i.test(text)) push("thermochromic");
-  if (/光致变色|photochromic/i.test(text)) push("photochromic");
-  if (/\bPDLC\b|液晶/i.test(text)) push("PDLC");
+  if (/鐢佃嚧鍙樿壊|electrochromic/i.test(text)) push("electrochromic");
+  if (/鐑嚧鍙樿壊|thermochromic/i.test(text)) push("thermochromic");
+  if (/鍏夎嚧鍙樿壊|photochromic/i.test(text)) push("photochromic");
+  if (/\bPDLC\b|娑叉櫠/i.test(text)) push("PDLC");
   if (/\bSPD\b/i.test(text)) push("SPD");
-  if (/发展历史|演进|历程|概述|定义|分类|history|overview/i.test(text)) push("technology history");
-  if (/建筑|节能|幕墙|采光|energy|building/i.test(text)) push("building energy saving");
-  if (/应用|场景|市场|未来|趋势|application|market|future/i.test(text)) push("applications market");
+  if (/鍙戝睍鍘嗗彶|婕旇繘|鍘嗙▼|姒傝堪|瀹氫箟|鍒嗙被|history|overview/i.test(text)) push("technology history");
+  if (/寤虹瓚|鑺傝兘|骞曞|閲囧厜|energy|building/i.test(text)) push("building energy saving");
+  if (/搴旂敤|鍦烘櫙|甯傚満|鏈潵|瓒嬪娍|application|market|future/i.test(text)) push("applications market");
 
   return parts.join(" ").trim();
 }
@@ -1080,6 +1021,7 @@ installWorkflowRoutes(app, {
   normalizeGeminiAspectRatio,
   normalizeGeminiImageSize,
   parseDataUrl,
+  loadReferenceAssetAsDataUrl,
 });
 
 app.post("/api/test-image-key", async (req, res) => {
@@ -1117,7 +1059,7 @@ app.post("/api/test-image-key", async (req, res) => {
       return res.json({
         ok: true,
         provider: "gemini",
-        message: `Google API Key 可用，可访问 ${model}。`,
+        message: `Google API Key 可用，可以访问 ${model}。`,
       });
     } catch (error) {
       return res.status(500).json({
@@ -1144,7 +1086,7 @@ app.post("/api/test-image-key", async (req, res) => {
       body: JSON.stringify({
         model: "qwen3.5-plus",
         messages: [
-          { role: "user", content: "请只回复 OK" },
+          { role: "user", content: "璇峰彧鍥炲 OK" },
         ],
         stream: false,
       }),
@@ -1158,7 +1100,7 @@ app.post("/api/test-image-key", async (req, res) => {
     return res.json({
       ok: true,
       provider: "dashscope",
-      message: "DashScope / Qwen API Key 可用，可正常调用 Qwen。",
+      message: "DashScope / Qwen API Key 可用，可以正常调用 Qwen。",
     });
   } catch (error) {
     return res.status(500).json({
@@ -1499,6 +1441,9 @@ app.post("/api/files/parse", upload.array("files", 20), async (req, res) => {
           previewText: extractedText.slice(0, 2400),
           parseStatus: parsed.parseStatus,
           parseNote: parsed.parseNote,
+          assetId: parsed.assetId || "",
+          assetFileName: parsed.assetFileName || "",
+          previewUrl: parsed.previewUrl || "",
         });
       } catch (error) {
         parsedFiles.push({
@@ -1640,13 +1585,20 @@ app.post("/api/export-workflow-ppt", async (req, res) => {
   }
 
   try {
-    const { Presentation, PresentationFile } = await loadArtifactToolModule();
     const slideSize = getPptSlideSize(slideAspect);
-    const presentation = Presentation.create({ slideSize });
+    const layout = getPptLayout(slideAspect);
+    const pptx = new PptxGenJS();
     const deckTitle = normalizeExportText(projectTitle) || "智能生成导出";
+    pptx.author = "Nano Banana PPT Studio";
+    pptx.company = "PPTgen";
+    pptx.subject = "Workflow PPT export";
+    pptx.title = deckTitle;
+    pptx.lang = "zh-CN";
+    pptx.defineLayout(layout);
+    pptx.layout = layout.name;
 
     for (const slideData of exportSlides) {
-      const slide = presentation.slides.add();
+      const slide = pptx.addSlide();
       const margin = Math.round(slideSize.width * 0.05);
       const innerWidth = slideSize.width - margin * 2;
       const titleTop = Math.round(slideSize.height * 0.065);
@@ -1657,124 +1609,102 @@ app.post("/api/export-workflow-ppt", async (req, res) => {
       const bodyTop = slideData.imageUrl ? imageTop + imageHeight + Math.round(slideSize.height * 0.04) : imageTop;
       const bodyHeight = slideSize.height - bodyTop - margin;
 
-      slide.background.fill = "#F5F7FB";
-
-      const panel = slide.shapes.add({
-        geometry: "roundRect",
-        position: {
+      slide.background = { color: "F5F7FB" };
+      slide.addShape(pptx.ShapeType.roundRect, {
+        ...toPptPosition({
           left: Math.round(slideSize.width * 0.022),
           top: Math.round(slideSize.height * 0.03),
           width: Math.round(slideSize.width * 0.956),
           height: Math.round(slideSize.height * 0.94),
-        },
-        fill: "#FFFFFF",
-        line: { style: "solid", fill: "#D9E2EC", width: 1 },
+        }, slideSize, layout),
+        fill: { color: "FFFFFF" },
+        line: { color: "D9E2EC", width: 1 },
       });
-      panel.adjustmentList = [{ name: "adj", formula: "val 12000" }];
-
-      const accent = slide.shapes.add({
-        geometry: "roundRect",
-        position: {
+      slide.addShape(pptx.ShapeType.roundRect, {
+        ...toPptPosition({
           left: margin,
           top: Math.round(slideSize.height * 0.042),
           width: Math.round(slideSize.width * 0.11),
           height: Math.round(slideSize.height * 0.01),
-        },
-        fill: "#2563EB",
-        line: { width: 0, fill: "#2563EB" },
+        }, slideSize, layout),
+        fill: { color: "2563EB" },
+        line: { color: "2563EB", transparency: 100 },
       });
-      accent.adjustmentList = [{ name: "adj", formula: "val 50000" }];
-
-      const titleShape = slide.shapes.add({
-        geometry: "rect",
-        position: {
+      slide.addText(slideData.title, {
+        ...toPptPosition({
           left: margin,
           top: titleTop,
           width: innerWidth - pageBadgeWidth - 20,
           height: titleHeight,
-        },
-        fill: "#FFFFFF00",
-        line: { width: 0, fill: "#FFFFFF00" },
+        }, slideSize, layout),
+        fontSize: Math.round(slideSize.height * 0.045),
+        bold: true,
+        color: "0F172A",
+        fontFace: "Microsoft YaHei",
+        valign: "mid",
+        fit: "shrink",
       });
-      titleShape.text = slideData.title;
-      titleShape.text.fontSize = Math.round(slideSize.height * 0.045);
-      titleShape.text.bold = true;
-      titleShape.text.color = "#0F172A";
-      titleShape.text.typeface = "Microsoft YaHei";
-      titleShape.text.verticalAlignment = "middle";
-
-      const badge = slide.shapes.add({
-        geometry: "roundRect",
-        position: {
+      slide.addText(`第 ${slideData.pageNumber} 页`, {
+        ...toPptPosition({
           left: slideSize.width - margin - pageBadgeWidth,
           top: titleTop + 4,
           width: pageBadgeWidth,
           height: Math.round(slideSize.height * 0.05),
-        },
-        fill: "#EEF4FF",
-        line: { width: 0, fill: "#EEF4FF" },
+        }, slideSize, layout),
+        shape: pptx.ShapeType.roundRect,
+        fill: { color: "EEF4FF" },
+        line: { color: "EEF4FF", transparency: 100 },
+        fontSize: Math.round(slideSize.height * 0.022),
+        color: "2563EB",
+        bold: true,
+        fontFace: "Microsoft YaHei",
+        align: "center",
+        valign: "mid",
       });
-      badge.adjustmentList = [{ name: "adj", formula: "val 30000" }];
-      badge.text = `第 ${slideData.pageNumber} 页`;
-      badge.text.fontSize = Math.round(slideSize.height * 0.022);
-      badge.text.color = "#2563EB";
-      badge.text.bold = true;
-      badge.text.typeface = "Microsoft YaHei";
-      badge.text.alignment = "center";
-      badge.text.verticalAlignment = "middle";
 
       if (slideData.imageUrl) {
         const image = await loadGeminiImageSource(slideData.imageUrl);
-        const imageShape = slide.images.add({
-          blob: bufferToArrayBuffer(image.buffer),
-          fit: "cover",
-          alt: slideData.title,
-          geometry: "roundRect",
+        slide.addImage({
+          data: toDataUrl(image.buffer, image.mimeType),
+          altText: slideData.title,
+          ...toPptPosition({
+            left: margin,
+            top: imageTop,
+            width: innerWidth,
+            height: imageHeight,
+          }, slideSize, layout),
         });
-        imageShape.position = {
-          left: margin,
-          top: imageTop,
-          width: innerWidth,
-          height: imageHeight,
-        };
       }
 
-      const bodyPanel = slide.shapes.add({
-        geometry: "roundRect",
-        position: {
+      slide.addShape(pptx.ShapeType.roundRect, {
+        ...toPptPosition({
           left: margin,
           top: bodyTop,
           width: innerWidth,
           height: Math.max(bodyHeight, Math.round(slideSize.height * 0.18)),
-        },
-        fill: "#F8FAFC",
-        line: { style: "solid", fill: "#E2E8F0", width: 1 },
+        }, slideSize, layout),
+        fill: { color: "F8FAFC" },
+        line: { color: "E2E8F0", width: 1 },
       });
-      bodyPanel.adjustmentList = [{ name: "adj", formula: "val 10000" }];
-
-      const bodyShape = slide.shapes.add({
-        geometry: "rect",
-        position: {
+      slide.addText(slideData.body || " ", {
+        ...toPptPosition({
           left: margin + Math.round(slideSize.width * 0.018),
           top: bodyTop + Math.round(slideSize.height * 0.018),
           width: innerWidth - Math.round(slideSize.width * 0.036),
           height: Math.max(bodyHeight - Math.round(slideSize.height * 0.036), Math.round(slideSize.height * 0.14)),
-        },
-        fill: "#FFFFFF00",
-        line: { width: 0, fill: "#FFFFFF00" },
+        }, slideSize, layout),
+        fontSize: slideData.imageUrl ? Math.round(slideSize.height * 0.024) : Math.round(slideSize.height * 0.03),
+        color: "334155",
+        fontFace: "Microsoft YaHei",
+        margin: 0,
+        fit: "shrink",
+        breakLine: false,
       });
-      bodyShape.text = slideData.body || " ";
-      bodyShape.text.fontSize = slideData.imageUrl ? Math.round(slideSize.height * 0.024) : Math.round(slideSize.height * 0.03);
-      bodyShape.text.color = "#334155";
-      bodyShape.text.typeface = "Microsoft YaHei";
-      bodyShape.text.insets = { left: 0, right: 0, top: 0, bottom: 0 };
-      bodyShape.text.autoFit = "shrinkText";
     }
 
     const fileName = `${sanitizeSegment(deckTitle, "workflow-export")}_${buildTimestamp()}_${crypto.randomUUID().slice(0, 6)}.pptx`;
     const targetPath = path.join(EXPORTS_DIR, fileName);
-    const pptx = await PresentationFile.exportPptx(presentation);
-    await pptx.save(targetPath);
+    await pptx.writeFile({ fileName: targetPath, compression: true });
 
     return res.json({
       ok: true,
@@ -1789,7 +1719,6 @@ app.post("/api/export-workflow-ppt", async (req, res) => {
     });
   }
 });
-
 function startServer(port) {
   const server = app.listen(port, () => {
     console.log(`Nano Banana PPT Studio is running at http://localhost:${port}`);
@@ -1808,3 +1737,5 @@ function startServer(port) {
 }
 
 startServer(Number(PORT) || 3000);
+
+

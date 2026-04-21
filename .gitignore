@@ -8,4 +8,8 @@ tmp/
 tmp-server*.log
 data/ppt-guide-extract/
 data/studio-library.json
+data/reference-assets/
+data/*.docx
+data/*.pptx
+data/*.pdf
 .claude/

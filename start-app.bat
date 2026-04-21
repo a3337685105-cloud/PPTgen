@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-title Nano Banana PPT Studio
+title PPTgen V2 Studio
 
 if not "%~1"=="" (
   set "APP_PORT=%~1"
@@ -50,7 +50,7 @@ if not "%APP_PORT%"=="%REQUESTED_PORT%" (
   echo [INFO] Port %REQUESTED_PORT% is already in use. Switched to %APP_PORT%.
 )
 
-set "APP_URL=http://127.0.0.1:%APP_PORT%"
+set "APP_URL=http://127.0.0.1:%APP_PORT%/"
 
 echo [2/3] Waiting for app to become available...
 start "" powershell -NoProfile -ExecutionPolicy Bypass -Command ^
@@ -67,7 +67,7 @@ start "" powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "}" ^
   "Start-Process $url"
 
-echo [3/3] Starting local server on port %APP_PORT%...
+echo [3/3] Starting PPTgen V2 local server on port %APP_PORT%...
 echo [INFO] If the browser does not open automatically, open %APP_URL%
 node server.js
 
