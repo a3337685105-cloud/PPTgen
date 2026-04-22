@@ -441,6 +441,10 @@ function installWorkflowRoutes(app, deps) {
     parseJsonResponse,
     requestGeminiJson,
     requestGrsaiGenerate,
+    resolveDashScopeApiKey = (value) => String(value || process.env.DASHSCOPE_API_KEY || process.env.QWEN_API_KEY || "").trim(),
+    resolveHostedImageApiKey = (value) => String(value || process.env.GRSAI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim(),
+    resolveGrsaiApiKey = (value) => String(value || process.env.GRSAI_API_KEY || "").trim(),
+    resolveGeminiApiKey = (value) => String(value || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim(),
     normalizeGeminiGenerateResponse,
     buildGeminiModelUrl,
     normalizeGeminiAspectRatio,
@@ -1160,7 +1164,24 @@ function getAiProcessingModeLabel(value) {
     return "";
   }
 
-  async function runThemeDefinition(apiKey, region, themeName, decorationLevel, preferences, referenceFiles = []) {
+  async function runThemeDefinition(apiKey, region, themeName, decorationLevel, preferences, referenceFiles = [], context = {}) {
+    themeName = String(themeName || "").trim() || "AI 自动匹配成熟风格";
+    const contentContextBlock = [
+      context?.documentSummary ? `【内容摘要】\n${context.documentSummary}` : "",
+      context?.pagePlanSummary ? `【已拆分页计划】\n${context.pagePlanSummary}` : "",
+      context?.mainText ? `【用户原始内容】\n${String(context.mainText).slice(0, 6000)}` : "",
+    ].filter(Boolean).join("\n\n");
+    const matureStyleBlock = [
+      "【成熟风格候选库】",
+      "请先根据内容自动选择最合适的一种作为基底，再叠加用户偏好：",
+      "1. Swiss Editorial：瑞士网格、清晰层级、克制留白，适合研究、咨询、商业汇报。",
+      "2. McKinsey Executive：高密度但有秩序的数据叙事，适合战略、市场、经营分析。",
+      "3. Apple Keynote：大留白、强主视觉、少字高质感，适合产品、品牌、发布。",
+      "4. Bloomberg Terminal Editorial：深色信息密度、精确图表、金融科技感，适合数据和趋势。",
+      "5. Museum Exhibition：展陈级叙事、材料质感、庄重文化感，适合历史、人文、艺术。",
+      "6. Scientific Journal：实验室白、精确注释、理性克制，适合学术、医疗、工程。",
+      "不要把候选库逐条罗列给用户，要把选择结果融合进最终主题模板。",
+    ].join("\n");
     const systemPrompt = [
       "你是一位专注 PPT 视觉表达的高级艺术总监及 UI/UX 专家。",
 "你的任务是为顶级生图大模型 Nano Banana 2 撰写极具画面感、物理质感的【中文】系统级提示词。",
@@ -1179,6 +1200,8 @@ function getAiProcessingModeLabel(value) {
 `请为“${themeName}”设计全局主题模板。目标生图模型：Nano Banana 2。`,
       `装饰强度：${getDecorationLevelLabel(decorationLevel)}`,
       buildPreferencePromptBlock(preferences),
+      contentContextBlock,
+      matureStyleBlock,
 "【Nano Banana 2 模型专属特性要求】",
       "1. 画面感极值：该模型对【材质】、【光影】和【渲染引擎】极其敏感。必须大量使用如“Octane Render渲染”、“虚幻引擎5”、“电影级光影”、“丁达尔效应”、“表面微磨砂”、“SSS次表面散射”等顶级CG行业术语。",
       "2. 绝不用抽象词：该模型不懂“好看”、“干净”等抽象词汇。必须转化为物理描述，如“背景为无反光的摄影棚纯色背景”、“光线为顶部柔和漫反射”。",
@@ -1208,6 +1231,8 @@ function getAiProcessingModeLabel(value) {
       "必须严格继承用户提供的主题描述、配色倾向、字体气质、材质隐喻和风格问卷；这些信息要贯穿 displaySummaryZh、modelPrompt、basic、cover、catalog、chapter、content、data 全部字段。",
       "如果用户已经明确指定了风格方向，不要被通用模板覆盖，不要改写成默认审美。",
       buildPreferencePromptBlock(preferences),
+      contentContextBlock,
+      matureStyleBlock,
       "【Nano Banana 2 表达要求】",
       "1. 语言必须具体、可视、物理化，优先描述材质、光影、空间、镜头、渲染质感。",
       "2. 避免抽象空话；把“高级、干净、好看”改写成可见画面描述。",
@@ -1578,24 +1603,43 @@ function getAiProcessingModeLabel(value) {
   }
 
   app.post("/api/workflow/theme", async (req, res) => {
-    const { apiKey, region, themeName, decorationLevel, preferences, referenceFiles } = req.body || {};
-    if (!apiKey) {
+    const {
+      apiKey,
+      region,
+      themeName,
+      decorationLevel,
+      preferences,
+      referenceFiles,
+      workflowJobId,
+      contentContext,
+      pagePlanSummary,
+    } = req.body || {};
+    const effectiveApiKey = resolveDashScopeApiKey(apiKey);
+    if (!effectiveApiKey) {
       return res.status(400).json({ code: "MissingApiKey", message: "请先填写 DashScope / Qwen API Key。" });
-    }
-    if (!String(themeName || "").trim()) {
-      return res.status(400).json({ code: "MissingThemeName", message: "请先输入风格主题。" });
     }
 
     try {
       const normalizedPreferences = normalizePreferences(preferences);
       const normalizedReferenceFiles = normalizeReferenceFiles(referenceFiles);
+      const contextJob = workflowJobId ? workflowJobs.get(String(workflowJobId)) : null;
+      const context = {
+        mainText: String(contentContext || "").trim(),
+        documentSummary: contextJob?.documentSummary || "",
+        pagePlanSummary: String(pagePlanSummary || "").trim()
+          || (contextJob?.pages || [])
+            .slice(0, 24)
+            .map((page) => `${page.pageNumber}. [${page.pageType}] ${page.pageTitle}: ${stringifyStructuredField(page.pageContent).slice(0, 180)}`)
+            .join("\n"),
+      };
       const result = await runThemeDefinition(
-        apiKey,
+        effectiveApiKey,
         region || DEFAULT_REGION,
-        String(themeName || "").trim(),
+        String(themeName || "").trim() || "AI 自动匹配成熟风格",
         decorationLevel,
         normalizedPreferences,
         normalizedReferenceFiles,
+        context,
       );
       return res.json({
         ok: true,
@@ -1606,6 +1650,32 @@ function getAiProcessingModeLabel(value) {
       return res.status(500).json({
         code: "WorkflowThemeFailed",
         message: error.message || "生成主题模板失败。",
+      });
+    }
+  });
+
+  app.post("/api/workflow/theme/apply", async (req, res) => {
+    const { jobId, themeDefinition, preferences, decorationLevel, promptTrace } = req.body || {};
+    try {
+      const job = getWorkflowJobOrThrow(jobId);
+      const normalizedPreferences = normalizePreferences(preferences);
+      job.themeDefinition = normalizeThemeDefinition(
+        themeDefinition || {},
+        themeDefinition?.themeName || "AI 自动匹配成熟风格",
+        decorationLevel || job.themeDefinition?.decorationLevel || DEFAULT_DECORATION_LEVEL,
+        normalizedPreferences,
+      );
+      job.preferences = normalizedPreferences;
+      job.promptTrace.themeCore = promptTrace?.themeCore || promptTrace || job.promptTrace.themeCore;
+      job.updatedAt = new Date().toISOString();
+      return res.json({
+        ok: true,
+        job: serializeWorkflowJob(job),
+      });
+    } catch (error) {
+      return res.status(error.status || 500).json({
+        code: "WorkflowThemeApplyFailed",
+        message: error.message || "应用主题模板失败。",
       });
     }
   });
@@ -1627,7 +1697,8 @@ function getAiProcessingModeLabel(value) {
       decorationLevel,
     } = req.body || {};
 
-    if (!apiKey) {
+    const effectiveApiKey = resolveDashScopeApiKey(apiKey);
+    if (!effectiveApiKey) {
       return res.status(400).json({ code: "MissingApiKey", message: "请先填写 DashScope / Qwen API Key。" });
     }
 
@@ -1647,14 +1718,14 @@ function getAiProcessingModeLabel(value) {
       const normalizedReferenceFiles = normalizeReferenceFiles(referenceFiles)
         .filter((item) => item.includeInSplit && item.parseStatus === "parsed" && (item.extractedText || item.previewText));
       const referenceDigestResult = await runReferenceDigest(
-        apiKey,
+        effectiveApiKey,
         region || DEFAULT_REGION,
         mainText,
         normalizedReferenceFiles,
         normalizedPreferences,
         normalizedThemeDefinition,
       );
-      const splitResult = await runSplitPlan(apiKey, region || DEFAULT_REGION, {
+      const splitResult = await runSplitPlan(effectiveApiKey, region || DEFAULT_REGION, {
         mainText,
         pageCount: Math.max(1, Number(pageCount) || 6),
         splitPreset: String(splitTemplate || "").trim(),
@@ -1699,7 +1770,7 @@ function getAiProcessingModeLabel(value) {
       refreshJobProgress(job);
 
       setTimeout(() => {
-        prepareWorkflowJob(job, apiKey, region || DEFAULT_REGION, {
+        prepareWorkflowJob(job, effectiveApiKey, region || DEFAULT_REGION, {
           enableExpansion: normalizedEnableExpansion,
           targetChars: normalizedTargetChars,
           maxChars: normalizedMaxChars,
@@ -1740,6 +1811,7 @@ function getAiProcessingModeLabel(value) {
 
   app.post("/api/workflow/page/reprepare", async (req, res) => {
     const { apiKey, region, jobId, pageId, onscreenContent, autoExpandToMaxChars } = req.body || {};
+    const effectiveApiKey = resolveDashScopeApiKey(apiKey);
     try {
       const job = getWorkflowJobOrThrow(jobId);
       const page = getWorkflowPageOrThrow(job, pageId);
@@ -1766,13 +1838,13 @@ function getAiProcessingModeLabel(value) {
             message: "当前工作流没有可用的最大字数设置，无法执行 AI 一键重润。",
           });
         }
-        if (!String(apiKey || "").trim()) {
+        if (!String(effectiveApiKey || "").trim()) {
           return res.status(400).json({
             code: "MissingApiKey",
             message: "请先填写 API Key，再执行 AI 一键重润。",
           });
         }
-        const lengthResult = await runPageExpansion(apiKey, region || DEFAULT_REGION, {
+        const lengthResult = await runPageExpansion(effectiveApiKey, region || DEFAULT_REGION, {
           enableExpansion: true,
           targetChars: normalizedMaxChars,
           maxChars: normalizedMaxChars,
@@ -1834,11 +1906,15 @@ function getAiProcessingModeLabel(value) {
     const selectedImageModel = String(imageModel || WORKFLOW_IMAGE_MODEL).trim() || WORKFLOW_IMAGE_MODEL;
     const useGemini = GEMINI_WORKFLOW_IMAGE_MODELS.has(selectedImageModel);
     const useGrsai = GRSAI_WORKFLOW_IMAGE_MODELS.has(selectedImageModel);
+    const effectiveApiKey = resolveDashScopeApiKey(apiKey);
+    const effectiveGoogleApiKey = useGrsai
+      ? resolveGrsaiApiKey(googleApiKey)
+      : resolveGeminiApiKey(googleApiKey);
 
-    if ((useGemini || useGrsai) && !googleApiKey) {
+    if ((useGemini || useGrsai) && !effectiveGoogleApiKey) {
       return res.status(400).json({ code: "MissingGoogleApiKey", message: "请先填写 Google API Key。" });
     }
-    if (!useGemini && !useGrsai && !apiKey) {
+    if (!useGemini && !useGrsai && !effectiveApiKey) {
       return res.status(400).json({ code: "MissingApiKey", message: "请先填写 DashScope / Qwen API Key。" });
     }
 
@@ -1896,7 +1972,7 @@ function getAiProcessingModeLabel(value) {
         const parsed = await requestGeminiJson({
           method: "POST",
           url: `${buildGeminiModelUrl(selectedImageModel)}:generateContent`,
-          headers: { "x-goog-api-key": googleApiKey },
+          headers: { "x-goog-api-key": effectiveGoogleApiKey },
           body: JSON.stringify(geminiBody),
         });
 
@@ -1939,7 +2015,7 @@ function getAiProcessingModeLabel(value) {
         }
 
         responsePayload = await requestGrsaiGenerate({
-          apiKey: googleApiKey,
+          apiKey: effectiveGoogleApiKey,
           model: selectedImageModel,
           payload: grsaiPayload,
           slideAspect,
@@ -1979,7 +2055,7 @@ function getAiProcessingModeLabel(value) {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
+            Authorization: `Bearer ${effectiveApiKey}`,
           },
           body: JSON.stringify(dashscopePayload),
         });
@@ -2028,8 +2104,9 @@ function getAiProcessingModeLabel(value) {
 
   app.post("/api/workflow/page/generate", async (req, res) => {
     const { googleApiKey, jobId, pageId, slideAspect, size, seed, extraPrompt, canvasImage } = req.body || {};
+    const effectiveGoogleApiKey = resolveGeminiApiKey(googleApiKey);
 
-    if (!googleApiKey) {
+    if (!effectiveGoogleApiKey) {
       return res.status(400).json({ code: "MissingGoogleApiKey", message: "请先填写 Google API Key。" });
     }
 
@@ -2072,7 +2149,7 @@ function getAiProcessingModeLabel(value) {
       const parsed = await requestGeminiJson({
         method: "POST",
         url: `${buildGeminiModelUrl(WORKFLOW_IMAGE_MODEL)}:generateContent`,
-        headers: { "x-goog-api-key": googleApiKey },
+        headers: { "x-goog-api-key": effectiveGoogleApiKey },
         body: JSON.stringify(geminiBody),
       });
 

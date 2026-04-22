@@ -97,7 +97,7 @@ const THEME_PROMPT_SECTIONS = [
 
 const state = {
   activeTab: "smart",
-  smartStep: "theme",
+  smartStep: "split",
   settings: {
     apiKey: "",
     googleApiKey: "",
@@ -190,6 +190,10 @@ function cacheElements() {
     "themeSummaryPreview",
     "themePromptTabs",
     "themeModelPrompt",
+    "quickApiKey",
+    "quickGoogleApiKey",
+    "quickGrsaiHost",
+    "quickTestApiKeyBtn",
       "workflowPageCount",
     "workflowContent",
     "splitTemplateInput",
@@ -510,7 +514,10 @@ function loadState() {
   const parsed = safeJsonParse(localStorage.getItem(STORAGE_KEY) || "");
   if (!parsed || typeof parsed !== "object") return;
   state.activeTab = ["smart", "history", "revise", "settings"].includes(parsed.activeTab) ? parsed.activeTab : "smart";
-  state.smartStep = ["theme", "split", "pages"].includes(parsed.smartStep) ? parsed.smartStep : "theme";
+  state.smartStep = ["split", "theme", "pages"].includes(parsed.smartStep) ? parsed.smartStep : "split";
+  if (state.smartStep === "theme" && !parsed.workflowJob && !parsed.themeDefinition) {
+    state.smartStep = "split";
+  }
   state.settings = { ...state.settings, ...(parsed.settings || {}) };
   state.workspaceZoom = clamp(Number(parsed.workspaceZoom || 100), 50, 140);
   state.themeName = String(parsed.themeName || "");
@@ -563,6 +570,9 @@ function applyStateToUi() {
   syncSplitExpansionControls();
   el.apiKey.value = state.settings.apiKey || "";
   el.googleApiKey.value = state.settings.googleApiKey || "";
+  if (el.quickApiKey) el.quickApiKey.value = state.settings.apiKey || "";
+  if (el.quickGoogleApiKey) el.quickGoogleApiKey.value = state.settings.googleApiKey || "";
+  if (el.quickGrsaiHost) el.quickGrsaiHost.value = state.settings.grsaiHost || "domestic";
   el.workflowImageModel.value = state.settings.workflowImageModel || PPT_MODEL;
   if (el.enableGeminiGoogleSearch) {
     el.enableGeminiGoogleSearch.checked = Boolean(state.settings.enableGeminiGoogleSearch);
@@ -653,8 +663,8 @@ function switchSmartStep(step) {
     panel.classList.toggle("is-active", panel.dataset.stepPanel === step);
   });
   const meta = {
-    theme: "先把全局风格确认下来，再进入拆分。",
-    split: "主文本是主输入，参考文件只是补充材料。",
+    split: "先把内容拆分和字数倾向定下来，再匹配稳定的成熟风格。",
+    theme: "AI 会根据拆分后的页面结构自动选择风格基底，用户输入作为修饰。",
     pages: state.workflowJob
       ? `${state.workflowJob.readyToGeneratePages || 0} 页已可直接生成，${state.workflowJob.preparedPages || 0}/${state.workflowJob.totalPages || 0} 页已完成准备。`
       : "左侧看进度，中间改上屏内容，右侧直接生成当前页。",
@@ -752,7 +762,7 @@ function sanitizeRecoveredWorkflowJob(job) {
 
 function getWorkflowGenerationSize() {
   const aspectMeta = getAspectMeta();
-  return usingGeminiWorkflowModel()
+  return usingHostedWorkflowModel()
     ? state.settings.outputSize
     : (aspectMeta?.outputSize || ASPECT_META["16:9"].outputSize);
 }
@@ -845,7 +855,7 @@ function syncPageDraftFromPage(page, { force = false } = {}) {
 
 function updateThemeView() {
   el.confirmThemeBtn.disabled = !state.themeDefinition;
-  el.goSplitBtn.disabled = !state.themeConfirmed;
+  el.goSplitBtn.disabled = !state.themeConfirmed && !state.workflowJob;
   el.themeSummaryPreview.textContent = state.themeDefinition?.displaySummaryZh || "风格摘要会显示在这里。";
   el.themeModelPrompt.textContent = state.themePromptTrace
     ? stringifyTrace(state.themePromptTrace)
@@ -1846,12 +1856,31 @@ function renderReferenceFiles() {
   `).join("");
 }
 
-function confirmTheme() {
+async function confirmTheme() {
   if (!state.themeDefinition) return;
   state.themeConfirmed = true;
+  if (state.workflowJobId && state.workflowJob) {
+    try {
+      const data = await apiJson("/api/workflow/theme/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jobId: state.workflowJobId,
+          themeDefinition: state.themeDefinition,
+          preferences: state.preferences,
+          decorationLevel: state.decorationLevel,
+          promptTrace: { themeCore: state.themePromptTrace },
+        }),
+      });
+      state.workflowJob = sanitizeRecoveredWorkflowJob(data.job);
+    } catch (error) {
+      setStatus(error.message || "应用风格失败。", "error");
+      return;
+    }
+  }
   updateThemeView();
-  switchSmartStep("split");
-  setStatus("风格已确认，继续输入文本并拆分。", "success");
+  switchSmartStep(state.workflowJob ? "pages" : "split");
+  setStatus(state.workflowJob ? "风格已应用到当前项目，可以逐页确认并生成。" : "风格已确认，继续输入文本并拆分。", "success");
   saveState();
 }
 
@@ -1873,6 +1902,14 @@ function renderOnscreenPreview(value) {
   }).join("");
 }
 
+function buildThemePagePlanSummary() {
+  const pages = Array.isArray(state.workflowJob?.pages) ? state.workflowJob.pages : [];
+  return pages.slice(0, 24).map((page) => {
+    const content = formatOnscreenPreview(page.onscreenContentText || page.onscreenContent || page.pageContent || "");
+    return `${page.pageNumber}. [${page.pageType || "content"}] ${page.pageTitle || ""}: ${content.slice(0, 180)}`;
+  }).join("\n");
+}
+
 async function generateTheme() {
   state.themeName = el.themeName.value.trim();
   state.decorationLevel = el.themeDecorationLevel.value;
@@ -1882,12 +1919,8 @@ async function generateTheme() {
     switchTab("settings");
     return;
   }
-  if (!state.themeName) {
-    setStatus("请先输入风格主题。", "error");
-    return;
-  }
   const signal = startCancelableAction("theme", el.generateThemeBtn, el.cancelThemeBtn, "生成中...");
-  setStatus("正在生成风格主题...", "running");
+  setStatus("正在根据内容匹配风格主题...", "running");
   try {
     const data = await apiJson("/api/workflow/theme", {
       method: "POST",
@@ -1896,10 +1929,13 @@ async function generateTheme() {
       body: JSON.stringify({
         apiKey: state.settings.apiKey,
         region: state.settings.region,
-        themeName: state.themeName,
+        themeName: state.themeName || "AI 自动匹配成熟风格",
         decorationLevel: state.decorationLevel,
         preferences: state.preferences,
         referenceFiles: state.parsedFiles,
+        workflowJobId: state.workflowJobId,
+        contentContext: state.workflowContent,
+        pagePlanSummary: buildThemePagePlanSummary(),
       }),
     });
     state.themeDefinition = data.themeDefinition;
@@ -2008,7 +2044,6 @@ function bindEvents() {
   document.querySelectorAll(".ribbon-step").forEach((button) => {
     button.addEventListener("click", () => {
       const next = button.dataset.step;
-      if (next === "split" && !state.themeConfirmed) return;
       if (next === "pages" && !state.workflowJob) return;
       switchSmartStep(next);
     });
@@ -2035,7 +2070,7 @@ function bindEvents() {
   el.generateThemeBtn.addEventListener("click", generateTheme);
   el.cancelThemeBtn.addEventListener("click", () => cancelAction("theme"));
   el.confirmThemeBtn.addEventListener("click", confirmTheme);
-  el.goSplitBtn.addEventListener("click", () => switchSmartStep("split"));
+  el.goSplitBtn.addEventListener("click", () => switchSmartStep(state.workflowJob ? "pages" : "split"));
   el.backToThemeBtn.addEventListener("click", () => switchSmartStep("theme"));
   el.backToSplitBtn.addEventListener("click", () => switchSmartStep("split"));
   el.pickReferenceFilesBtn.addEventListener("click", () => el.referenceFilesInput.click());
@@ -2111,8 +2146,26 @@ function bindEvents() {
   el.sendReviseBtn.addEventListener("click", sendRevise);
   el.cancelReviseBtn.addEventListener("click", () => cancelAction("revise"));
 
-  el.apiKey.addEventListener("input", () => { state.settings.apiKey = el.apiKey.value.trim(); saveState(); });
-  el.googleApiKey.addEventListener("input", () => { state.settings.googleApiKey = el.googleApiKey.value.trim(); saveState(); });
+  el.apiKey.addEventListener("input", () => {
+    state.settings.apiKey = el.apiKey.value.trim();
+    if (el.quickApiKey) el.quickApiKey.value = state.settings.apiKey;
+    saveState();
+  });
+  el.googleApiKey.addEventListener("input", () => {
+    state.settings.googleApiKey = el.googleApiKey.value.trim();
+    if (el.quickGoogleApiKey) el.quickGoogleApiKey.value = state.settings.googleApiKey;
+    saveState();
+  });
+  el.quickApiKey?.addEventListener("input", () => {
+    state.settings.apiKey = el.quickApiKey.value.trim();
+    if (el.apiKey) el.apiKey.value = state.settings.apiKey;
+    saveState();
+  });
+  el.quickGoogleApiKey?.addEventListener("input", () => {
+    state.settings.googleApiKey = el.quickGoogleApiKey.value.trim();
+    if (el.googleApiKey) el.googleApiKey.value = state.settings.googleApiKey;
+    saveState();
+  });
   el.workflowImageModel.addEventListener("change", () => {
     state.settings.workflowImageModel = el.workflowImageModel.value || PPT_MODEL;
     syncGeminiSearchControls();
@@ -2120,6 +2173,12 @@ function bindEvents() {
   });
   el.grsaiHost?.addEventListener("change", () => {
     state.settings.grsaiHost = el.grsaiHost.value || "domestic";
+    if (el.quickGrsaiHost) el.quickGrsaiHost.value = state.settings.grsaiHost;
+    saveState();
+  });
+  el.quickGrsaiHost?.addEventListener("change", () => {
+    state.settings.grsaiHost = el.quickGrsaiHost.value || "domestic";
+    if (el.grsaiHost) el.grsaiHost.value = state.settings.grsaiHost;
     saveState();
   });
   el.enableGeminiGoogleSearch?.addEventListener("change", () => {
@@ -2131,6 +2190,7 @@ function bindEvents() {
   el.outputSize.addEventListener("change", () => { state.settings.outputSize = el.outputSize.value; saveState(); });
   el.seed.addEventListener("input", () => { state.settings.seed = el.seed.value.trim(); saveState(); });
   el.testApiKeyBtn.addEventListener("click", testApiKeys);
+  el.quickTestApiKeyBtn?.addEventListener("click", testApiKeys);
   el.cancelTestApiKeyBtn.addEventListener("click", () => cancelAction("testApi"));
 
   document.addEventListener("keydown", (event) => {
@@ -2234,11 +2294,6 @@ async function runSplit() {
     if (el.workflowTargetChars) el.workflowTargetChars.value = String(state.workflowTargetChars);
   }
   state.splitTemplateText = "";
-  if (!state.themeConfirmed) {
-    setStatus("请先确认风格。", "error");
-    switchSmartStep("theme");
-    return;
-  }
   if (!state.settings.apiKey) {
     setStatus("请先填写 DashScope / Qwen API Key。", "error");
     switchTab("settings");
@@ -2261,7 +2316,6 @@ async function runSplit() {
     statusText: "正在拆分内容并准备逐页结果...",
   };
   state.selectedPageId = "";
-  switchSmartStep("pages");
   renderPagesWorkbench();
   setStatus("正在拆分内容并准备逐页结果...", "running");
   try {
@@ -2291,7 +2345,9 @@ async function runSplit() {
     ensureSelectedPage();
     startWorkflowPolling();
     renderPagesWorkbench();
-    setStatus("拆分完成，正在同步逐页结果。", "success");
+    state.themeConfirmed = false;
+    switchSmartStep("theme");
+    setStatus("内容已拆分，下一步根据页面结构匹配风格。", "success");
     saveState();
   } catch (error) {
     if (isAbortError(error)) {

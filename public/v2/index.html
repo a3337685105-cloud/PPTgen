@@ -55,14 +55,14 @@
             </div>
 
             <section class="smart-ribbon">
-              <button class="ribbon-step is-active" type="button" data-step="theme">
+              <button class="ribbon-step is-active" type="button" data-step="split">
                 <span>1</span>
-                <strong>确定风格</strong>
+                <strong>内容与拆分</strong>
               </button>
               <div class="ribbon-arrow" aria-hidden="true"></div>
-              <button class="ribbon-step" type="button" data-step="split">
+              <button class="ribbon-step" type="button" data-step="theme">
                 <span>2</span>
-                <strong>文本与拆分</strong>
+                <strong>匹配风格</strong>
               </button>
               <div class="ribbon-arrow" aria-hidden="true"></div>
               <button class="ribbon-step" type="button" data-step="pages">
@@ -72,7 +72,7 @@
             </section>
 
             <div class="smart-stage-shell">
-              <section class="smart-stage is-active" data-step-panel="theme">
+              <section class="smart-stage" data-step-panel="theme">
                 <div class="theme-stage-grid">
                   <article class="glass-card">
                     <h2>开头问卷</h2>
@@ -171,10 +171,28 @@
                 </div>
               </section>
 
-              <section class="smart-stage" data-step-panel="split">
+              <section class="smart-stage is-active" data-step-panel="split">
                 <div class="split-stage-grid">
                   <article class="glass-card">
                     <h2>输入文本</h2>
+                    <div class="quick-api-panel">
+                      <label class="field">
+                        <span>DashScope / Qwen API Key</span>
+                        <input id="quickApiKey" type="password" placeholder="用于内容拆分和风格匹配；本机已配置可留空" />
+                      </label>
+                      <label class="field">
+                        <span>Nano Banana / Gemini API Key</span>
+                        <input id="quickGoogleApiKey" type="password" placeholder="用于 Grsai 生图；本机已配置可留空" />
+                      </label>
+                      <label class="field">
+                        <span>Grsai Host</span>
+                        <select id="quickGrsaiHost">
+                          <option value="domestic">国内直连</option>
+                          <option value="overseas">海外</option>
+                        </select>
+                      </label>
+                      <button class="btn secondary" type="button" id="quickTestApiKeyBtn">测试 Key</button>
+                    </div>
                     <div class="split-control-grid">
                       <label class="field">
                         <span>目标页数</span>
@@ -224,7 +242,7 @@
 
                 </div>
                 <div class="stage-footer">
-                  <button class="btn ghost" type="button" id="backToThemeBtn">上一步</button>
+                  <button class="btn ghost" type="button" id="backToThemeBtn">风格设置</button>
                   <div class="action-group">
                     <button class="btn ghost cancel-btn" type="button" id="cancelSplitBtn" hidden>取消</button>
                     <button class="btn primary" type="button" id="runSplitBtn">确认总内容并拆分</button>

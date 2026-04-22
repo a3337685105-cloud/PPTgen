@@ -334,6 +334,18 @@ input:focus, select:focus, textarea:focus {
   grid-template-rows: minmax(0, 1fr);
 }
 
+.quick-api-panel {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(120px, 0.42fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid rgba(37, 99, 235, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
 .split-template-card {
   grid-column: 1 / -1;
 }
@@ -1379,6 +1391,10 @@ input:focus, select:focus, textarea:focus {
   .history-layout,
   .revise-grid,
   .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .quick-api-panel {
     grid-template-columns: 1fr;
   }
 

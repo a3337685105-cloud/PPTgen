@@ -19,6 +19,9 @@ const EXPORTS_DIR = path.join(ROOT_DIR, "exports");
 const DATA_DIR = path.join(ROOT_DIR, "data");
 const REFERENCE_ASSETS_DIR = path.join(DATA_DIR, "reference-assets");
 const LIBRARY_DOC_PATH = path.join(DATA_DIR, "studio-library.json");
+
+loadLocalEnv();
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -62,6 +65,39 @@ app.use("/reference-assets", express.static(REFERENCE_ASSETS_DIR));
 
 function resolveRegion(region) {
   return REGION_MAP[region] || REGION_MAP.beijing;
+}
+
+function loadLocalEnv() {
+  [".env.local", ".env"].forEach((fileName) => {
+    const filePath = path.join(ROOT_DIR, fileName);
+    if (!fs.existsSync(filePath)) return;
+    const content = fs.readFileSync(filePath, "utf8");
+    content.split(/\r?\n/).forEach((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) return;
+      const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+      if (!match) return;
+      const key = match[1];
+      if (Object.prototype.hasOwnProperty.call(process.env, key)) return;
+      process.env[key] = match[2].replace(/^["']|["']$/g, "");
+    });
+  });
+}
+
+function resolveDashScopeApiKey(apiKey) {
+  return String(apiKey || process.env.DASHSCOPE_API_KEY || process.env.QWEN_API_KEY || "").trim();
+}
+
+function resolveHostedImageApiKey(apiKey) {
+  return String(apiKey || process.env.GRSAI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+}
+
+function resolveGrsaiApiKey(apiKey) {
+  return String(apiKey || process.env.GRSAI_API_KEY || "").trim();
+}
+
+function resolveGeminiApiKey(apiKey) {
+  return String(apiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
 }
 
 function isGeminiImageModel(model) {
@@ -1148,6 +1184,10 @@ app.get("/api/health", (_req, res) => {
     generatedDir: GENERATED_DIR,
     libraryDocPath: LIBRARY_DOC_PATH,
     supportedRegions: Object.keys(REGION_MAP),
+    configuredKeys: {
+      dashscope: Boolean(resolveDashScopeApiKey("")),
+      hostedImage: Boolean(resolveHostedImageApiKey("")),
+    },
   });
 });
 
@@ -1193,6 +1233,10 @@ app.post("/api/library", async (req, res) => {
 installWorkflowRoutes(app, {
   resolveRegion,
   resolveGrsaiHost,
+  resolveDashScopeApiKey,
+  resolveHostedImageApiKey,
+  resolveGrsaiApiKey,
+  resolveGeminiApiKey,
   parseJsonResponse,
   requestGeminiJson,
   requestGrsaiGenerate,
@@ -1207,6 +1251,7 @@ installWorkflowRoutes(app, {
 
 app.post("/api/test-image-key", async (req, res) => {
   const { apiKey, googleApiKey, region, model, grsaiHost } = req.body || {};
+  const effectiveApiKey = resolveDashScopeApiKey(apiKey);
 
   if (!model) {
     return res.status(400).json({
@@ -1216,7 +1261,10 @@ app.post("/api/test-image-key", async (req, res) => {
   }
 
   if (isHostedImageModel(model)) {
-    if (!googleApiKey) {
+    const effectiveGoogleApiKey = isGrsaiImageModel(model)
+      ? resolveGrsaiApiKey(googleApiKey)
+      : resolveGeminiApiKey(googleApiKey);
+    if (!effectiveGoogleApiKey) {
       return res.status(400).json({
         code: "MissingGoogleApiKey",
         message: "请先填写 Nano Banana / Gemini API Key。",
@@ -1230,7 +1278,7 @@ app.post("/api/test-image-key", async (req, res) => {
           url: buildGrsaiResultUrl(grsaiHost),
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${googleApiKey}`,
+            Authorization: `Bearer ${effectiveGoogleApiKey}`,
           },
           body: JSON.stringify({ id: "codex-health-check" }),
         });
@@ -1259,7 +1307,7 @@ app.post("/api/test-image-key", async (req, res) => {
     try {
       const parsed = await requestGeminiJson({
         method: "GET",
-        url: `${buildGeminiModelUrl(model)}?key=${encodeURIComponent(googleApiKey)}`,
+        url: `${buildGeminiModelUrl(model)}?key=${encodeURIComponent(effectiveGoogleApiKey)}`,
       });
 
       if (!parsed.ok) {
@@ -1283,7 +1331,7 @@ app.post("/api/test-image-key", async (req, res) => {
     }
   }
 
-  if (!apiKey) {
+  if (!effectiveApiKey) {
     return res.status(400).json({
       code: "MissingApiKey",
       message: "请先填写 DashScope / Qwen API Key。",
@@ -1295,7 +1343,7 @@ app.post("/api/test-image-key", async (req, res) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${effectiveApiKey}`,
       },
       body: JSON.stringify({
         model: "qwen3.5-plus",
@@ -1331,7 +1379,11 @@ app.post("/api/generate", async (req, res, next) => {
     return next();
   }
 
-  if (!googleApiKey) {
+  const effectiveGoogleApiKey = isGrsaiImageModel(payload.model)
+    ? resolveGrsaiApiKey(googleApiKey)
+    : resolveGeminiApiKey(googleApiKey);
+
+  if (!effectiveGoogleApiKey) {
     return res.status(400).json({
       code: "MissingGoogleApiKey",
       message: "请先填写 Nano Banana / Gemini API Key，再调用生图模型。",
@@ -1341,7 +1393,7 @@ app.post("/api/generate", async (req, res, next) => {
   try {
     if (isGrsaiImageModel(payload.model)) {
       const normalized = await requestGrsaiGenerate({
-        apiKey: googleApiKey,
+        apiKey: effectiveGoogleApiKey,
         model: payload.model,
         payload,
         slideAspect,
@@ -1356,7 +1408,7 @@ app.post("/api/generate", async (req, res, next) => {
       method: "POST",
       url: `${buildGeminiModelUrl(payload.model)}:generateContent`,
       headers: {
-        "x-goog-api-key": googleApiKey,
+        "x-goog-api-key": effectiveGoogleApiKey,
       },
       body: JSON.stringify(geminiBody),
     });
@@ -1381,8 +1433,9 @@ app.post("/api/generate", async (req, res, next) => {
 
 app.post("/api/generate", async (req, res) => {
   const { apiKey, region, asyncMode, payload } = req.body || {};
+  const effectiveApiKey = resolveDashScopeApiKey(apiKey);
 
-  if (!apiKey) {
+  if (!effectiveApiKey) {
     return res.status(400).json({
       code: "MissingApiKey",
       message: "请先在页面中填写 API Key。",
@@ -1421,7 +1474,7 @@ app.post("/api/generate", async (req, res) => {
   try {
     const headers = {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+    Authorization: `Bearer ${effectiveApiKey}`,
     };
 
     if (asyncMode) {
@@ -1446,8 +1499,9 @@ app.post("/api/generate", async (req, res) => {
 
 app.post("/api/tasks/fetch", async (req, res) => {
   const { apiKey, region, taskId } = req.body || {};
+  const effectiveApiKey = resolveDashScopeApiKey(apiKey);
 
-  if (!apiKey || !taskId) {
+  if (!effectiveApiKey || !taskId) {
     return res.status(400).json({
       code: "MissingParams",
       message: "查询任务需要 API Key 和 task_id。",
@@ -1458,7 +1512,7 @@ app.post("/api/tasks/fetch", async (req, res) => {
     const response = await fetch(buildTaskUrl(region, taskId), {
       method: "GET",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${effectiveApiKey}`,
       },
     });
 
@@ -1474,8 +1528,9 @@ app.post("/api/tasks/fetch", async (req, res) => {
 
 app.post("/api/assistant", async (req, res) => {
   const { apiKey, region, payload } = req.body || {};
+  const effectiveApiKey = resolveDashScopeApiKey(apiKey);
 
-  if (!apiKey) {
+  if (!effectiveApiKey) {
     return res.status(400).json({
       code: "MissingApiKey",
       message: "调用提示词助手前请先填写 API Key。",
@@ -1494,7 +1549,7 @@ app.post("/api/assistant", async (req, res) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${effectiveApiKey}`,
       },
       body: JSON.stringify(payload),
     });
@@ -1511,8 +1566,9 @@ app.post("/api/assistant", async (req, res) => {
 
 app.post("/api/research-supplements", async (req, res) => {
   const { apiKey, region, page, themeLabel, visibleText, searchQuery: requestedSearchQuery } = req.body || {};
+  const effectiveApiKey = resolveDashScopeApiKey(apiKey);
 
-  if (!apiKey) {
+  if (!effectiveApiKey) {
     return res.status(400).json({
       code: "MissingApiKey",
       message: "调用联网补充前请先填写 API Key。",
@@ -1542,7 +1598,7 @@ app.post("/api/research-supplements", async (req, res) => {
   const generatedQuery = requestedSearchQuery
     ? ""
     : await generateResearchSearchQuery({
-      apiKey,
+      apiKey: effectiveApiKey,
       region,
       pageType,
       pageTitle,
@@ -1574,7 +1630,7 @@ app.post("/api/research-supplements", async (req, res) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${effectiveApiKey}`,
       },
       body: JSON.stringify({
         model: "qwen3.5-plus",
@@ -1606,7 +1662,7 @@ app.post("/api/research-supplements", async (req, res) => {
 
     if (!parsedJson || typeof parsedJson !== "object") {
       const repaired = await repairResearchOutputAsJson({
-        apiKey,
+        apiKey: effectiveApiKey,
         region,
         rawText: outputText || JSON.stringify(parsed.data),
       });
