@@ -70,7 +70,8 @@ function getWorkflowAssistantModel() {
 }
 
 function modelSupportsImageInputs(model) {
-  return /(?:vl|qvq|vision|omni)/i.test(String(model || ""));
+  const normalized = String(model || "").trim().toLowerCase();
+  return /(?:qwen3\.6|qwen3\.5|qwen3-vl|qwen2\.5-vl|qwen-vl|qwen3-omni|qwen-omni|qvq|vision|omni|vl|ocr)/i.test(normalized);
 }
 
 function stringifyStructuredField(value) {
@@ -557,7 +558,7 @@ function installWorkflowRoutes(app, deps) {
 
   async function runAssistantJsonObject(apiKey, region, systemPrompt, userPrompt, moduleName, options = {}) {
     const payload = buildAssistantPayload(systemPrompt, userPrompt, options);
-    const transport = options.transport || (payload.input.messages[1].content.some((item) => item.image) ? "dashscope-multimodal" : "compatible-chat");
+    const transport = options.transport || (modelSupportsImageInputs(payload.model) ? "dashscope-multimodal" : "compatible-chat");
     const { text } = transport === "compatible-chat"
       ? await callCompatibleChatJson(apiKey, region, {
         model: payload.model,
