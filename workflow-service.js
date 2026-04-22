@@ -1856,13 +1856,16 @@ function getAiProcessingModeLabel(value) {
       || "";
     const pptLayoutPrinciples = buildPptLayoutPrinciplesBlock();
     const layoutInstruction = layout.instruction;
+    const roleInstruction = "你是一位资深 PPT 视觉设计师，接下来要绘制的是一张可直接用于演示文稿的单页 PPT。请把正文内容转化为清晰、美观、可读的幻灯片画面。";
+    const basicPrompt = stringifyStructuredField(job.themeDefinition?.basic || "");
     return [
-      job.themeDefinition?.basic || "",
+      roleInstruction,
+      basicPrompt ? `基础风格：${basicPrompt}` : "",
       pptLayoutPrinciples,
       pageTypeTemplate,
       layoutInstruction,
       `本页标题：${page.pageTitle}`,
-      cleanOnscreenContent ? `以下是我的文字内容：\n${cleanOnscreenContent}` : "",
+      cleanOnscreenContent ? `正文内容：\n${cleanOnscreenContent}` : "",
       extraPrompt ? `补充要求：\n${normalizeOnscreenContent(extraPrompt)}` : "",
     ].filter(Boolean).join("\n\n");
   }
