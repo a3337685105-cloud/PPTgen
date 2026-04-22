@@ -14,6 +14,13 @@ const GRSAI_WORKFLOW_IMAGE_MODELS = new Set([
 ]);
 const DEFAULT_REGION = "beijing";
 const DEFAULT_DECORATION_LEVEL = "medium";
+const CONSTANTS_RULES = [
+  "Strictly follow CRAP design principles: Contrast, Repetition, Alignment, Proximity.",
+  "Ensure text is 100% legible against the background.",
+  "Keep all reading zones absolutely clean.",
+  "Do not overlap text with complex textures.",
+  "Use high contrast, precise alignment, and clear proximity grouping for every slide.",
+].join(" ");
 
 const DEFAULT_PREFERENCES = {
   styleMode: "business",
@@ -988,6 +995,9 @@ function getAiProcessingModeLabel(value) {
       visualElementsPrompt: "",
       visualElementsDisplay: "",
       contentBand: rawPage.recommendedBand || "balanced",
+      layoutInstruction: "",
+      layoutMapping: null,
+      jitDecoration: null,
       overflowFlag: false,
       overflowReason: "",
       revisionHint: "",
@@ -1018,6 +1028,8 @@ function getAiProcessingModeLabel(value) {
     page.visualElementsPrompt = visualElementsPrompt;
     page.visualElementsDisplay = separatedContent.visualElementsDisplay;
     page.contentBand = normalizeContentBand(page.contentBand || page.recommendedBand, cleanOnscreenContent);
+    page.layoutMapping = deriveLayoutMapping(page, cleanOnscreenContent);
+    page.layoutInstruction = page.layoutMapping.instruction;
     page.overflowFlag = charCount > 250;
     page.overflowReason = page.overflowFlag
       ? `当前页内容约 ${charCount} 字（按中英数字加权估算），建议关注页面密度。`
@@ -1051,6 +1063,7 @@ function getAiProcessingModeLabel(value) {
       imagePromptStrategy: "basic + pageTypeTemplate + languageInstruction + onscreenContent",
       quality: "disabled",
       layout: "disabled",
+      layoutMapping: page.layoutMapping,
       onscreenContent: cleanOnscreenContent,
       visualElementsPrompt,
     };
@@ -1494,6 +1507,58 @@ function getAiProcessingModeLabel(value) {
     preparePageForGeneration(job, page, "local-reprepare");
   }
 
+  function deriveLayoutMapping(page, cleanOnscreenContent = "") {
+    const pageType = String(page?.pageType || "content").toLowerCase();
+    const wordCount = Number(page?.estimatedChars || page?.word_count || countCharacters(cleanOnscreenContent));
+    const density = wordCount <= 60 ? "low" : wordCount <= 140 ? "medium" : wordCount <= 240 ? "high" : "very-high";
+    const type = ["cover", "catalog", "chapter", "content", "data"].includes(pageType) ? pageType : "content";
+    const table = {
+      cover: {
+        layout: "poster cover layout with one dominant title zone, single visual focal object, generous negative space",
+        text: "large title, short subtitle, minimal supporting metadata",
+      },
+      catalog: {
+        layout: "structured agenda grid, numbered vertical rhythm, clear navigation hierarchy",
+        text: "short section labels with consistent alignment and spacing",
+      },
+      chapter: {
+        layout: "chapter divider layout, oversized section number, strong material color block",
+        text: "one chapter title plus one concise transition line",
+      },
+      data: {
+        layout: density === "high" || density === "very-high"
+          ? "dashboard style data layout, clear chart containers, high-density but aligned information grid"
+          : "single chart hero layout with precise annotation zones",
+        text: "numbers and conclusions must dominate labels; keep axis and legends legible",
+      },
+      content: {
+        layout: density === "low"
+          ? "editorial feature layout, one key statement with supporting visual metaphor"
+          : density === "medium"
+            ? "two-column presentation layout, text column plus visual column, balanced whitespace"
+            : "Bento box UI grid, high-density text layout, grouped content cards with clean reading zones",
+        text: density === "low"
+          ? "headline and three short support points"
+          : density === "medium"
+            ? "section title, compact paragraph, 3-5 bullet points"
+            : "use cards, columns, and strict grouping to avoid small text walls",
+      },
+    };
+    const picked = table[type] || table.content;
+    return {
+      type,
+      wordCount,
+      density,
+      instruction: [
+        "[Layout]",
+        `Page type: ${type}. Word count band: ${density} (${wordCount}).`,
+        `Layout map: ${picked.layout}.`,
+        `Text hierarchy: ${picked.text}.`,
+        "Text areas must be separate from decorative visuals; never place text over busy imagery.",
+      ].join("\n"),
+    };
+  }
+
   async function prepareWorkflowJob(job, apiKey, region, options = {}) {
     const {
       enableExpansion = false,
@@ -1564,6 +1629,8 @@ function getAiProcessingModeLabel(value) {
 
   function buildPptLayoutPrinciplesBlock() {
     return [
+      "[Constants_Rules]",
+      CONSTANTS_RULES,
       "【PPT排版原则｜高优先级】",
       "对比：标题、结论、关键数字必须显著大于正文；标题与正文字号比例严格为 1:0.618。",
       "对比：标题、结论、关键数字必须显著大于正文；标题与正文字号比例严格为 1:0.618。",
@@ -1575,16 +1642,83 @@ function getAiProcessingModeLabel(value) {
     ].join("\n");
   }
 
+  function buildHeuristicDecoration(page, cleanOnscreenContent = "") {
+    const source = `${page?.pageTitle || ""}\n${cleanOnscreenContent}`.replace(/\s+/g, " ").trim();
+    const tokens = Array.from(new Set(
+      source
+        .split(/[^A-Za-z0-9\u4e00-\u9fa5]+/)
+        .map((item) => item.trim())
+        .filter((item) => item.length >= 2)
+        .slice(0, 8),
+    ));
+    const keywords = tokens.slice(0, 3);
+    const subject = keywords.join(", ") || String(page?.pageTitle || "topic").trim() || "topic";
+    return {
+      keywords,
+      decorationPrompt: `Subtle visual metaphor based on ${subject}; use it only as a quiet background watermark or small physical accent, never as clutter.`,
+      source: "heuristic",
+    };
+  }
+
+  async function runJitDecorationExtraction(apiKey, region, job, page) {
+    const cleanOnscreenContent = normalizeOnscreenContent(page.onscreenContentText || page.onscreenContent || page.pageContent);
+    const fallback = buildHeuristicDecoration(page, cleanOnscreenContent);
+    if (!apiKey) return fallback;
+
+    const systemPrompt = [
+      "You are a fast visual prompt assistant for PPT slide generation.",
+      "Extract only the most useful visual entities for the current slide.",
+      "Return JSON object only, no markdown.",
+      "Fields: keywords (array of 1-3 short strings), decorationPrompt (one concise English sentence).",
+    ].join("\n");
+    const userPrompt = [
+      "[Basic]",
+      stringifyStructuredField(job.themeDefinition?.basic || ""),
+      "[Page]",
+      `type: ${page.pageType || "content"}`,
+      `title: ${page.pageTitle || ""}`,
+      `content: ${cleanOnscreenContent}`,
+      "Create a subtle decoration prompt. It must not add unrelated objects, UI widgets, charts, or extra text.",
+    ].join("\n\n");
+
+    try {
+      const result = await runAssistantJsonObject(apiKey, region || DEFAULT_REGION, systemPrompt, userPrompt, "JIT page decoration", { temperature: 0.2 });
+      const keywords = Array.isArray(result.parsed?.keywords)
+        ? result.parsed.keywords.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 3)
+        : fallback.keywords;
+      const decorationPrompt = stringifyStructuredField(result.parsed?.decorationPrompt || result.parsed?.decoration || "").trim()
+        || fallback.decorationPrompt;
+      return {
+        keywords,
+        decorationPrompt,
+        source: "llm",
+        trace: { systemPrompt, userPrompt, responseText: result.text },
+      };
+    } catch (error) {
+      return {
+        ...fallback,
+        source: "heuristic-after-llm-error",
+        error: error.message || String(error),
+      };
+    }
+  }
+
   function buildFinalImagePrompt(job, page, extraPrompt = "") {
     const cleanOnscreenContent = normalizeOnscreenContent(page.onscreenContentText || page.onscreenContent || page.pageContent);
     const visualElementsPrompt = normalizeVisualElements(page.visualElementsPrompt || page.pageContent || "");
     const pageTypeKey = ["cover", "catalog", "chapter", "content", "data"].includes(page.pageType) ? page.pageType : "content";
     const pageTypeTemplate = job.themeDefinition?.[pageTypeKey] || "";
     const pptLayoutPrinciples = buildPptLayoutPrinciplesBlock();
+    const layoutInstruction = page.layoutInstruction || deriveLayoutMapping(page, cleanOnscreenContent).instruction;
+    const decorationInstruction = page.jitDecoration?.decorationPrompt
+      ? `[Decoration]\n${page.jitDecoration.decorationPrompt}`
+      : "";
     return [
       job.themeDefinition?.basic || "",
       pptLayoutPrinciples,
       pageTypeTemplate,
+      layoutInstruction,
+      decorationInstruction,
       `本页标题：${page.pageTitle}`,
       cleanOnscreenContent ? `以下是我的文字内容：\n${cleanOnscreenContent}` : "",
       visualElementsPrompt ? `画面补充建议：\n${visualElementsPrompt}` : "",
@@ -1926,12 +2060,28 @@ function getAiProcessingModeLabel(value) {
         page.onscreenContentText = page.onscreenContent;
         preparePageForGeneration(job, page, "generate-inline");
       }
+      page.generationStatus = "preparing";
+      page.generationError = "";
+      page.jitDecoration = await runJitDecorationExtraction(effectiveApiKey, region || DEFAULT_REGION, job, page);
+      page.promptTrace.jitDecoration = page.jitDecoration.trace || {
+        source: page.jitDecoration.source,
+        keywords: page.jitDecoration.keywords,
+        decorationPrompt: page.jitDecoration.decorationPrompt,
+        error: page.jitDecoration.error || "",
+      };
       const finalPrompt = buildFinalImagePrompt(job, page, String(extraPrompt || "").trim());
+      page.generationStatus = "running";
       page.promptTrace.finalImage = {
         builtAt: new Date().toISOString(),
         model: selectedImageModel,
         prompt: finalPrompt,
         extraPrompt: String(extraPrompt || "").trim(),
+        layoutMapping: page.layoutMapping || null,
+        jitDecoration: {
+          keywords: page.jitDecoration?.keywords || [],
+          decorationPrompt: page.jitDecoration?.decorationPrompt || "",
+          source: page.jitDecoration?.source || "",
+        },
         hasCanvasImage: Boolean(canvasImage),
         googleSearchEnabled: Boolean(enableGeminiGoogleSearch && useGemini),
         searchMetadata: null,
@@ -2113,11 +2263,27 @@ function getAiProcessingModeLabel(value) {
     try {
       const job = getWorkflowJobOrThrow(jobId);
       const page = getWorkflowPageOrThrow(job, pageId);
+      page.generationStatus = "preparing";
+      page.generationError = "";
+      page.jitDecoration = await runJitDecorationExtraction("", DEFAULT_REGION, job, page);
+      page.promptTrace.jitDecoration = page.jitDecoration.trace || {
+        source: page.jitDecoration.source,
+        keywords: page.jitDecoration.keywords,
+        decorationPrompt: page.jitDecoration.decorationPrompt,
+        error: page.jitDecoration.error || "",
+      };
       const finalPrompt = buildFinalImagePrompt(job, page, String(extraPrompt || "").trim());
+      page.generationStatus = "running";
       page.promptTrace.finalImage = {
         builtAt: new Date().toISOString(),
         prompt: finalPrompt,
         extraPrompt: String(extraPrompt || "").trim(),
+        layoutMapping: page.layoutMapping || null,
+        jitDecoration: {
+          keywords: page.jitDecoration?.keywords || [],
+          decorationPrompt: page.jitDecoration?.decorationPrompt || "",
+          source: page.jitDecoration?.source || "",
+        },
         hasCanvasImage: Boolean(canvasImage),
       };
 
