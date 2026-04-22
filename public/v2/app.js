@@ -109,6 +109,13 @@ const state = {
     outputSize: "2K",
     seed: "",
   },
+  serverConfig: {
+    loaded: false,
+    configuredKeys: {
+      dashscope: false,
+      hostedImage: false,
+    },
+  },
   workspaceZoom: 100,
   themeName: "",
   decorationLevel: "medium",
@@ -713,6 +720,14 @@ function usingGeminiWorkflowModel() {
 function usingHostedWorkflowModel() {
   const model = getCurrentWorkflowImageModel();
   return GEMINI_WORKFLOW_MODELS.has(model) || GRSAI_WORKFLOW_MODELS.has(model);
+}
+
+function hasDashScopeApiKey() {
+  return Boolean(state.settings.apiKey || state.serverConfig?.configuredKeys?.dashscope);
+}
+
+function hasHostedImageApiKey() {
+  return Boolean(state.settings.googleApiKey || state.serverConfig?.configuredKeys?.hostedImage);
 }
 
 function syncWorkflowModelOptions() {
@@ -1583,6 +1598,30 @@ async function apiJson(url, options = {}) {
   return data;
 }
 
+async function refreshServerConfig() {
+  try {
+    const response = await fetch("/api/health");
+    if (!response.ok) return;
+    const data = await response.json();
+    state.serverConfig = {
+      loaded: true,
+      configuredKeys: {
+        dashscope: Boolean(data?.configuredKeys?.dashscope),
+        hostedImage: Boolean(data?.configuredKeys?.hostedImage),
+      },
+      workflowModels: data?.workflowModels || null,
+    };
+    syncCurrentPageGenerateUi();
+  } catch (_error) {
+    // Local env configuration is optional; keep UI usable if health probing fails.
+  }
+}
+
+async function ensureServerConfigReady() {
+  if (state.serverConfig?.loaded) return;
+  await refreshServerConfig();
+}
+
 async function handleReferenceFiles(event) {
   const files = Array.from(event.target.files || []);
   if (!files.length) return;
@@ -1914,7 +1953,8 @@ async function generateTheme() {
   state.themeName = el.themeName.value.trim();
   state.decorationLevel = el.themeDecorationLevel.value;
   state.preferences = getCurrentPreferences();
-  if (!state.settings.apiKey) {
+  await ensureServerConfigReady();
+  if (!hasDashScopeApiKey()) {
     setStatus("请先填写 DashScope / Qwen API Key。", "error");
     switchTab("settings");
     return;
@@ -1955,7 +1995,8 @@ async function generateTheme() {
 async function sendRevise() {
   const image = getCurrentReviseImage();
   state.revise.prompt = el.revisePrompt.value.trim();
-  if (!state.settings.apiKey) {
+  await ensureServerConfigReady();
+  if (!hasDashScopeApiKey()) {
     setStatus("改图需要 DashScope / Qwen API Key。", "error");
     switchTab("settings");
     return;
@@ -2294,7 +2335,8 @@ async function runSplit() {
     if (el.workflowTargetChars) el.workflowTargetChars.value = String(state.workflowTargetChars);
   }
   state.splitTemplateText = "";
-  if (!state.settings.apiKey) {
+  await ensureServerConfigReady();
+  if (!hasDashScopeApiKey()) {
     setStatus("请先填写 DashScope / Qwen API Key。", "error");
     switchTab("settings");
     return;
@@ -2460,13 +2502,14 @@ async function batchGenerateReadyPages() {
   const job = state.workflowJob;
   if (!job?.pages?.length) return;
 
+  await ensureServerConfigReady();
   const selectedImageModel = getCurrentWorkflowImageModel();
-  if (usingHostedWorkflowModel() && !state.settings.googleApiKey) {
+  if (usingHostedWorkflowModel() && !hasHostedImageApiKey()) {
     setStatus("请先填写 Nano Banana / Gemini API Key。", "error");
     switchTab("settings");
     return;
   }
-  if (!usingHostedWorkflowModel() && !state.settings.apiKey) {
+  if (!usingHostedWorkflowModel() && !hasDashScopeApiKey()) {
     setStatus("请先填写 DashScope / Qwen API Key。", "error");
     switchTab("settings");
     return;
@@ -2537,7 +2580,8 @@ async function testApiKeys() {
   state.settings.slideAspect = el.slideAspect.value;
   state.settings.outputSize = el.outputSize.value;
   state.settings.seed = el.seed.value.trim();
-  if (!state.settings.apiKey && !state.settings.googleApiKey) {
+  await ensureServerConfigReady();
+  if (!hasDashScopeApiKey() && !hasHostedImageApiKey()) {
     setStatus("请先填写至少一个可用的 API Key。", "error");
     return;
   }
@@ -2546,7 +2590,7 @@ async function testApiKeys() {
   try {
     const tasks = [];
     const selectedWorkflowModel = getCurrentWorkflowImageModel();
-    if (state.settings.googleApiKey && (GEMINI_WORKFLOW_MODELS.has(selectedWorkflowModel) || GRSAI_WORKFLOW_MODELS.has(selectedWorkflowModel))) {
+    if (hasHostedImageApiKey() && (GEMINI_WORKFLOW_MODELS.has(selectedWorkflowModel) || GRSAI_WORKFLOW_MODELS.has(selectedWorkflowModel))) {
       tasks.push(fetch("/api/test-image-key", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2560,7 +2604,7 @@ async function testApiKeys() {
         }),
       }).then(async (response) => ({ ok: response.ok, data: await response.json() })));
     }
-    if (state.settings.apiKey) {
+    if (hasDashScopeApiKey()) {
       tasks.push(fetch("/api/test-image-key", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2956,13 +3000,14 @@ async function generateCurrentPage() {
   const currentPageId = page.id;
   const currentPageNumber = page.pageNumber;
 
+  await ensureServerConfigReady();
   const selectedImageModel = getCurrentWorkflowImageModel();
-  if (usingHostedWorkflowModel() && !state.settings.googleApiKey) {
+  if (usingHostedWorkflowModel() && !hasHostedImageApiKey()) {
     setStatus("\u8bf7\u5148\u586b\u5199 Nano Banana / Gemini API Key\u3002", "error");
     switchTab("settings");
     return;
   }
-  if (!usingHostedWorkflowModel() && !state.settings.apiKey) {
+  if (!usingHostedWorkflowModel() && !hasDashScopeApiKey()) {
     setStatus("\u8bf7\u5148\u586b\u5199 DashScope / Qwen API Key\u3002", "error");
     switchTab("settings");
     return;
@@ -3037,6 +3082,7 @@ function initialize() {
   cacheElements();
   loadState();
   state.workflowJob = sanitizeRecoveredWorkflowJob(state.workflowJob);
+  refreshServerConfig();
   applyStateToUi();
   renderPreferenceSummary();
   renderSplitPresets();

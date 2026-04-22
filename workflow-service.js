@@ -487,6 +487,35 @@ function installWorkflowRoutes(app, deps) {
     return { data: parsed.data, text };
   }
 
+  async function callCompatibleChatJson(apiKey, region, { model, systemPrompt, userPrompt, temperature }) {
+    const body = {
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      response_format: { type: "json_object" },
+    };
+    if (Number.isFinite(Number(temperature))) {
+      body.temperature = Number(temperature);
+    }
+    const response = await fetch(buildChatCompletionsUrl(region || DEFAULT_REGION), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+    const parsed = await parseJsonResponse(response);
+    if (!parsed.ok || parsed.data?.code || parsed.data?.error) {
+      throw new Error(parsed.data?.error?.message || parsed.data?.message || "Qwen compatible chat 调用失败。");
+    }
+    const text = extractChatCompletionText(parsed.data);
+    if (!text) throw new Error("Qwen compatible chat 返回为空。");
+    return { data: parsed.data, text };
+  }
+
   function buildAssistantPayload(systemPrompt, userPrompt, options = {}) {
     const imageDataUrls = Array.isArray(options.imageDataUrls) ? options.imageDataUrls.filter(Boolean) : [];
     const payload = {
@@ -517,7 +546,14 @@ function installWorkflowRoutes(app, deps) {
 
   async function runAssistantJsonObject(apiKey, region, systemPrompt, userPrompt, moduleName, options = {}) {
     const payload = buildAssistantPayload(systemPrompt, userPrompt, options);
-    const { text } = await callAssistant(apiKey, region, payload);
+    const { text } = options.transport === "compatible-chat"
+      ? await callCompatibleChatJson(apiKey, region, {
+        model: payload.model,
+        systemPrompt,
+        userPrompt,
+        temperature: options.temperature,
+      })
+      : await callAssistant(apiKey, region, payload);
     const parsed = safeParseJsonObject(text);
     if (!parsed || typeof parsed !== "object") {
       throw new Error(`${moduleName} 返回的 JSON 无法解析。`);
@@ -1275,12 +1311,14 @@ function getAiProcessingModeLabel(value) {
       "{\"displaySummaryZh\":\"...\",\"modelPrompt\":\"...\",\"basic\":\"...\",\"cover\":\"...\",\"catalog\":\"...\",\"chapter\":\"...\",\"content\":\"...\",\"data\":\"...\"}",
     ].join("\n\n");
 
-    const imageDataUrls = await loadReferenceImageDataUrls(referenceFiles);
     const styleModel = getWorkflowStyleModel();
+    const styleModelSupportsImages = /(?:vl|qvq|vision)/i.test(styleModel);
+    const imageDataUrls = styleModelSupportsImages ? await loadReferenceImageDataUrls(referenceFiles) : [];
     const result = await runAssistantJsonObject(apiKey, region, effectiveSystemPrompt, effectiveUserPrompt, "主题模板", {
       imageDataUrls,
       model: styleModel,
       temperature: 0.35,
+      transport: styleModelSupportsImages ? "dashscope-multimodal" : "compatible-chat",
     });
     return {
       themeDefinition: normalizeThemeDefinition(result.parsed, themeName, decorationLevel, preferences),
@@ -1704,6 +1742,7 @@ function getAiProcessingModeLabel(value) {
       const result = await runAssistantJsonObject(apiKey, region || DEFAULT_REGION, systemPrompt, userPrompt, "JIT page decoration", {
         model: jitModel,
         temperature: 0.2,
+        transport: /(?:vl|qvq|vision)/i.test(jitModel) ? "dashscope-multimodal" : "compatible-chat",
       });
       const keywords = Array.isArray(result.parsed?.keywords)
         ? result.parsed.keywords.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 3)
