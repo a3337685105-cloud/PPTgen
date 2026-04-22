@@ -2425,8 +2425,13 @@ function renderPageList() {
   el.workflowPageList.innerHTML = job.pages.map((page) => {
     const typeMeta = getPageTypeMeta(page.pageType);
     const pageActive = isPageGenerating(page.id);
-    const status = page.generated ? "已生成" : pageActive ? "生成中" : page.prepareDone ? "可生成" : "处理中";
-    const statusClass = page.generated ? "generated" : (pageActive || page.prepareDone) ? "ready" : "idle";
+    const serverBusy = ["preparing", "running"].includes(page.generationStatus);
+    const status = page.generated
+      ? "已生成"
+      : pageActive || serverBusy
+        ? (page.generationStatus === "preparing" ? "准备提示词" : "生成中")
+        : page.prepareDone ? "可生成" : "处理中";
+    const statusClass = page.generated ? "generated" : (pageActive || serverBusy || page.prepareDone) ? "ready" : "idle";
     const riskClass = page.riskLevel === "high" ? "high" : page.riskLevel === "medium" ? "medium" : "";
     return `
       <div class="page-item ${page.id === state.selectedPageId ? "is-active" : ""}" data-page-id="${page.id}">
@@ -2968,8 +2973,10 @@ async function generateCurrentPage() {
   draft.onscreenContent = updateCurrentPageDraftFromEditors();
   const requestKey = getPageGenerateRequestKey(page.id);
   const signal = startCancelableAction(requestKey, null, null);
+  page.generationStatus = "preparing";
+  page.generationError = "";
   renderPagesWorkbench();
-  setStatus(`\u6b63\u5728\u751f\u6210\u7b2c${page.pageNumber}\u9875...`, "running");
+  setStatus(`\u7b2c${page.pageNumber}\u9875\u5df2\u8fdb\u5165\u751f\u6210\u961f\u5217\uff0c\u6b63\u5728\u51c6\u5907\u63d0\u793a\u8bcd...`, "running");
   try {
     const canvasImage = await exportCurrentArtboard();
     const generatePromise = apiJson("/api/workflow/page/generate-v2", {
@@ -3012,6 +3019,11 @@ async function generateCurrentPage() {
       clearWorkflowSession({ toSplit: true });
       setStatus("\u4e4b\u524d\u7684\u62c6\u5206\u4efb\u52a1\u5df2\u5931\u6548\uff0c\u8bf7\u91cd\u65b0\u62c6\u5206\u3002", "error");
       return;
+    }
+    const current = state.workflowJob?.pages?.find((item) => item.id === currentPageId);
+    if (current) {
+      current.generationStatus = "error";
+      current.generationError = error.message || "\u751f\u6210\u5931\u8d25\u3002";
     }
     setStatus(error.message || "\u751f\u6210\u5931\u8d25\u3002", "error");
   } finally {

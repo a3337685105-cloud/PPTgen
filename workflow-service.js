@@ -1,6 +1,7 @@
 const crypto = require("crypto");
 
 const WORKFLOW_ASSISTANT_MODEL = "qwen3.6-plus";
+const DEFAULT_LIGHTWEIGHT_ASSISTANT_MODEL = "qwen-turbo-latest";
 const WORKFLOW_IMAGE_MODEL = "nano-banana-2";
 const GEMINI_WORKFLOW_IMAGE_MODELS = new Set([
   "gemini-3.1-flash-image-preview",
@@ -55,6 +56,14 @@ const AI_PROCESSING_MODES = {
 };
 
 const workflowJobs = new Map();
+
+function getWorkflowStyleModel() {
+  return String(process.env.WORKFLOW_STYLE_MODEL || process.env.QWEN_LIGHTWEIGHT_MODEL || DEFAULT_LIGHTWEIGHT_ASSISTANT_MODEL).trim();
+}
+
+function getWorkflowJitModel() {
+  return String(process.env.WORKFLOW_JIT_MODEL || process.env.QWEN_LIGHTWEIGHT_MODEL || DEFAULT_LIGHTWEIGHT_ASSISTANT_MODEL).trim();
+}
 
 function stringifyStructuredField(value) {
   if (typeof value === "string") return value.trim();
@@ -480,8 +489,8 @@ function installWorkflowRoutes(app, deps) {
 
   function buildAssistantPayload(systemPrompt, userPrompt, options = {}) {
     const imageDataUrls = Array.isArray(options.imageDataUrls) ? options.imageDataUrls.filter(Boolean) : [];
-    return {
-      model: WORKFLOW_ASSISTANT_MODEL,
+    const payload = {
+      model: String(options.model || WORKFLOW_ASSISTANT_MODEL).trim() || WORKFLOW_ASSISTANT_MODEL,
       input: {
         messages: [
           { role: "system", content: [{ text: systemPrompt }] },
@@ -500,6 +509,10 @@ function installWorkflowRoutes(app, deps) {
         enable_thinking: false,
       },
     };
+    if (Number.isFinite(Number(options.temperature))) {
+      payload.parameters.temperature = Number(options.temperature);
+    }
+    return payload;
   }
 
   async function runAssistantJsonObject(apiKey, region, systemPrompt, userPrompt, moduleName, options = {}) {
@@ -1263,10 +1276,15 @@ function getAiProcessingModeLabel(value) {
     ].join("\n\n");
 
     const imageDataUrls = await loadReferenceImageDataUrls(referenceFiles);
-    const result = await runAssistantJsonObject(apiKey, region, effectiveSystemPrompt, effectiveUserPrompt, "主题模板", { imageDataUrls });
+    const styleModel = getWorkflowStyleModel();
+    const result = await runAssistantJsonObject(apiKey, region, effectiveSystemPrompt, effectiveUserPrompt, "主题模板", {
+      imageDataUrls,
+      model: styleModel,
+      temperature: 0.35,
+    });
     return {
       themeDefinition: normalizeThemeDefinition(result.parsed, themeName, decorationLevel, preferences),
-      trace: { systemPrompt: effectiveSystemPrompt, userPrompt: effectiveUserPrompt, responseText: result.text },
+      trace: { model: styleModel, systemPrompt: effectiveSystemPrompt, userPrompt: effectiveUserPrompt, responseText: result.text },
     };
   }
 
@@ -1682,7 +1700,11 @@ function getAiProcessingModeLabel(value) {
     ].join("\n\n");
 
     try {
-      const result = await runAssistantJsonObject(apiKey, region || DEFAULT_REGION, systemPrompt, userPrompt, "JIT page decoration", { temperature: 0.2 });
+      const jitModel = getWorkflowJitModel();
+      const result = await runAssistantJsonObject(apiKey, region || DEFAULT_REGION, systemPrompt, userPrompt, "JIT page decoration", {
+        model: jitModel,
+        temperature: 0.2,
+      });
       const keywords = Array.isArray(result.parsed?.keywords)
         ? result.parsed.keywords.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 3)
         : fallback.keywords;
@@ -1692,7 +1714,7 @@ function getAiProcessingModeLabel(value) {
         keywords,
         decorationPrompt,
         source: "llm",
-        trace: { systemPrompt, userPrompt, responseText: result.text },
+        trace: { model: jitModel, systemPrompt, userPrompt, responseText: result.text },
       };
     } catch (error) {
       return {

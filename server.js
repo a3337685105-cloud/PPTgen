@@ -1188,6 +1188,10 @@ app.get("/api/health", (_req, res) => {
       dashscope: Boolean(resolveDashScopeApiKey("")),
       hostedImage: Boolean(resolveHostedImageApiKey("")),
     },
+    workflowModels: {
+      style: process.env.WORKFLOW_STYLE_MODEL || process.env.QWEN_LIGHTWEIGHT_MODEL || "qwen-turbo-latest",
+      jit: process.env.WORKFLOW_JIT_MODEL || process.env.QWEN_LIGHTWEIGHT_MODEL || "qwen-turbo-latest",
+    },
   });
 });
 
