@@ -65,6 +65,14 @@ function getWorkflowJitModel() {
   return String(process.env.WORKFLOW_JIT_MODEL || process.env.QWEN_LIGHTWEIGHT_MODEL || DEFAULT_LIGHTWEIGHT_ASSISTANT_MODEL).trim();
 }
 
+function getWorkflowAssistantModel() {
+  return String(process.env.WORKFLOW_ASSISTANT_MODEL || WORKFLOW_ASSISTANT_MODEL).trim() || WORKFLOW_ASSISTANT_MODEL;
+}
+
+function modelSupportsImageInputs(model) {
+  return /(?:vl|qvq|vision|omni)/i.test(String(model || ""));
+}
+
 function stringifyStructuredField(value) {
   if (typeof value === "string") return value.trim();
   if (typeof value === "number" || typeof value === "boolean") return String(value);
@@ -517,9 +525,12 @@ function installWorkflowRoutes(app, deps) {
   }
 
   function buildAssistantPayload(systemPrompt, userPrompt, options = {}) {
-    const imageDataUrls = Array.isArray(options.imageDataUrls) ? options.imageDataUrls.filter(Boolean) : [];
+    const model = String(options.model || getWorkflowAssistantModel()).trim() || WORKFLOW_ASSISTANT_MODEL;
+    const imageDataUrls = modelSupportsImageInputs(model) && Array.isArray(options.imageDataUrls)
+      ? options.imageDataUrls.filter(Boolean)
+      : [];
     const payload = {
-      model: String(options.model || WORKFLOW_ASSISTANT_MODEL).trim() || WORKFLOW_ASSISTANT_MODEL,
+      model,
       input: {
         messages: [
           { role: "system", content: [{ text: systemPrompt }] },
@@ -546,7 +557,8 @@ function installWorkflowRoutes(app, deps) {
 
   async function runAssistantJsonObject(apiKey, region, systemPrompt, userPrompt, moduleName, options = {}) {
     const payload = buildAssistantPayload(systemPrompt, userPrompt, options);
-    const { text } = options.transport === "compatible-chat"
+    const transport = options.transport || (payload.input.messages[1].content.some((item) => item.image) ? "dashscope-multimodal" : "compatible-chat");
+    const { text } = transport === "compatible-chat"
       ? await callCompatibleChatJson(apiKey, region, {
         model: payload.model,
         systemPrompt,
@@ -1312,7 +1324,7 @@ function getAiProcessingModeLabel(value) {
     ].join("\n\n");
 
     const styleModel = getWorkflowStyleModel();
-    const styleModelSupportsImages = /(?:vl|qvq|vision)/i.test(styleModel);
+    const styleModelSupportsImages = modelSupportsImageInputs(styleModel);
     const imageDataUrls = styleModelSupportsImages ? await loadReferenceImageDataUrls(referenceFiles) : [];
     const result = await runAssistantJsonObject(apiKey, region, effectiveSystemPrompt, effectiveUserPrompt, "主题模板", {
       imageDataUrls,
@@ -1351,8 +1363,12 @@ function getAiProcessingModeLabel(value) {
       "{\"summary\":\"...\",\"usableFacts\":[\"...\"],\"cautions\":[\"...\"]}",
     ].join("\n\n");
 
-    const imageDataUrls = await loadReferenceImageDataUrls(referenceFiles);
-    const result = await runAssistantJsonObject(apiKey, region, systemPrompt, userPrompt, "参考材料摘要", { imageDataUrls });
+    const assistantModel = getWorkflowAssistantModel();
+    const imageDataUrls = modelSupportsImageInputs(assistantModel) ? await loadReferenceImageDataUrls(referenceFiles) : [];
+    const result = await runAssistantJsonObject(apiKey, region, systemPrompt, userPrompt, "参考材料摘要", {
+      imageDataUrls,
+      model: assistantModel,
+    });
     return {
       digest: {
         summary: stringifyStructuredField(result.parsed.summary || ""),
@@ -1742,7 +1758,7 @@ function getAiProcessingModeLabel(value) {
       const result = await runAssistantJsonObject(apiKey, region || DEFAULT_REGION, systemPrompt, userPrompt, "JIT page decoration", {
         model: jitModel,
         temperature: 0.2,
-        transport: /(?:vl|qvq|vision)/i.test(jitModel) ? "dashscope-multimodal" : "compatible-chat",
+        transport: modelSupportsImageInputs(jitModel) ? "dashscope-multimodal" : "compatible-chat",
       });
       const keywords = Array.isArray(result.parsed?.keywords)
         ? result.parsed.keywords.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 3)

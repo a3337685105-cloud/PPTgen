@@ -1189,6 +1189,7 @@ app.get("/api/health", (_req, res) => {
       hostedImage: Boolean(resolveHostedImageApiKey("")),
     },
     workflowModels: {
+      assistant: process.env.WORKFLOW_ASSISTANT_MODEL || "qwen3.6-plus",
       style: process.env.WORKFLOW_STYLE_MODEL || process.env.QWEN_LIGHTWEIGHT_MODEL || "qwen-turbo-latest",
       jit: process.env.WORKFLOW_JIT_MODEL || process.env.QWEN_LIGHTWEIGHT_MODEL || "qwen-turbo-latest",
     },
