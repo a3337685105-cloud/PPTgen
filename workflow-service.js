@@ -2330,6 +2330,70 @@ function getAiProcessingModeLabel(value) {
     }
   });
 
+  app.post("/api/workflow/page/prompt", async (req, res) => {
+    const {
+      apiKey,
+      region,
+      imageModel,
+      jobId,
+      pageId,
+      extraPrompt,
+      canvasImage,
+      onscreenContent,
+      enableGeminiGoogleSearch,
+    } = req.body || {};
+
+    const selectedImageModel = String(imageModel || WORKFLOW_IMAGE_MODEL).trim() || WORKFLOW_IMAGE_MODEL;
+    const useGemini = GEMINI_WORKFLOW_IMAGE_MODELS.has(selectedImageModel);
+    const effectiveApiKey = resolveDashScopeApiKey(apiKey);
+
+    try {
+      const job = getWorkflowJobOrThrow(jobId);
+      const page = getWorkflowPageOrThrow(job, pageId);
+      if (String(onscreenContent || "").trim()) {
+        page.onscreenContent = normalizeOnscreenContent(String(onscreenContent || "").trim());
+        page.onscreenContentText = page.onscreenContent;
+        preparePageForGeneration(job, page, "prompt-copy");
+      }
+      page.jitDecoration = await runJitDecorationExtraction(effectiveApiKey, region || DEFAULT_REGION, job, page);
+      page.promptTrace.jitDecoration = page.jitDecoration.trace || {
+        source: page.jitDecoration.source,
+        keywords: page.jitDecoration.keywords,
+        decorationPrompt: page.jitDecoration.decorationPrompt,
+        error: page.jitDecoration.error || "",
+      };
+      const finalPrompt = buildFinalImagePrompt(job, page, String(extraPrompt || "").trim());
+      page.extraPrompt = String(extraPrompt || "").trim();
+      page.promptTrace.finalImage = {
+        builtAt: new Date().toISOString(),
+        model: selectedImageModel,
+        prompt: finalPrompt,
+        extraPrompt: String(extraPrompt || "").trim(),
+        layoutMapping: page.layoutMapping || null,
+        jitDecoration: {
+          keywords: page.jitDecoration?.keywords || [],
+          decorationPrompt: page.jitDecoration?.decorationPrompt || "",
+          source: page.jitDecoration?.source || "",
+        },
+        hasCanvasImage: Boolean(canvasImage),
+        googleSearchEnabled: Boolean(enableGeminiGoogleSearch && useGemini),
+        searchMetadata: null,
+      };
+      refreshJobProgress(job);
+
+      return res.json({
+        ok: true,
+        finalPrompt,
+        page,
+      });
+    } catch (error) {
+      return res.status(error.status || 500).json({
+        code: "WorkflowPagePromptFailed",
+        message: error.message || "准备页面提示词失败。",
+      });
+    }
+  });
+
   app.post("/api/workflow/page/generate", async (req, res) => {
     const { googleApiKey, jobId, pageId, slideAspect, size, seed, extraPrompt, canvasImage } = req.body || {};
     const effectiveGoogleApiKey = resolveGeminiApiKey(googleApiKey);

@@ -246,6 +246,7 @@ function cacheElements() {
     "pagePromptTrace",
     "pageResultStrip",
     "viewCurrentPageLargeBtn",
+    "copyPagePromptBtn",
     "exportWorkflowPptBtn",
     "historySummary",
     "historyProjectList",
@@ -1250,6 +1251,29 @@ function stringifyTrace(trace) {
   return JSON.stringify(trace, null, 2);
 }
 
+function getFinalPromptFromPage(page) {
+  return String(page?.promptTrace?.finalImage?.prompt || "").trim();
+}
+
+async function copyTextToClipboard(text) {
+  const value = String(text || "");
+  if (!value) return false;
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    await navigator.clipboard.writeText(value);
+    return true;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const ok = document.execCommand("copy");
+  textarea.remove();
+  return ok;
+}
+
 function getAspectMeta() {
   return ASPECT_META[state.settings.slideAspect] || ASPECT_META["16:9"];
 }
@@ -2163,6 +2187,7 @@ function bindEvents() {
   el.overlayFileInput.addEventListener("change", handleOverlayFiles);
   el.clearOverlayBtn.addEventListener("click", clearCurrentOverlays);
   el.generateCurrentPageBtn.addEventListener("click", generateCurrentPage);
+  el.copyPagePromptBtn?.addEventListener("click", copyCurrentPagePrompt);
   el.viewCurrentPageLargeBtn?.addEventListener("click", openCurrentPageLargeImage);
   el.exportWorkflowPptBtn?.addEventListener("click", exportWorkflowPpt);
   el.cancelGenerateCurrentPageBtn.addEventListener("click", () => {
@@ -2731,6 +2756,9 @@ function syncCurrentPageGenerateUi() {
   if (el.viewCurrentPageLargeBtn) {
     el.viewCurrentPageLargeBtn.disabled = !page?.baseImage || pageActive;
   }
+  if (el.copyPagePromptBtn) {
+    el.copyPagePromptBtn.disabled = !page || pageActive;
+  }
   if (el.exportWorkflowPptBtn) {
     const hasWorkflowPages = Array.isArray(state.workflowJob?.pages) && state.workflowJob.pages.length > 0;
     if (el.exportWorkflowPptBtn.textContent !== "导出中...") {
@@ -2898,6 +2926,7 @@ function renderPagesWorkbench() {
     el.pageExtraPrompt.value = "";
     el.pagePromptTrace.textContent = "";
     if (el.viewCurrentPageLargeBtn) el.viewCurrentPageLargeBtn.disabled = true;
+    if (el.copyPagePromptBtn) el.copyPagePromptBtn.disabled = true;
     renderArtboard();
     renderPageResults();
     syncCurrentPageGenerateUi();
@@ -2992,6 +3021,70 @@ async function reprepareCurrentPage() {
 
 async function aiRepolishCurrentPage() {
   return submitCurrentPageReprepare({ autoExpandToMaxChars: true });
+}
+
+async function copyCurrentPagePrompt() {
+  const page = getSelectedPage();
+  if (!page) return;
+  const draft = ensurePageDraft(page);
+  draft.extraPrompt = el.pageExtraPrompt.value.trim();
+  draft.onscreenContent = updateCurrentPageDraftFromEditors();
+  const promptTrace = page.promptTrace?.finalImage || null;
+  const pageContent = String(page.onscreenContentText || page.onscreenContent || page.pageContent || "").trim();
+  const promptIsCurrent = Boolean(promptTrace?.prompt)
+    && String(promptTrace.extraPrompt || "").trim() === draft.extraPrompt
+    && pageContent === String(draft.onscreenContent || "").trim();
+  let prompt = promptIsCurrent ? getFinalPromptFromPage(page) : "";
+
+  if (!prompt) {
+    const requestKey = `copyPrompt:${page.id}`;
+    const signal = startCancelableAction(requestKey, el.copyPagePromptBtn, null, "准备中...");
+    setStatus(`正在准备第${page.pageNumber}页最终提示词...`, "running");
+    try {
+      const canvasImage = await exportCurrentArtboard();
+      const data = await apiJson("/api/workflow/page/prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal,
+        body: JSON.stringify({
+          apiKey: state.settings.apiKey,
+          region: state.settings.region,
+          imageModel: getCurrentWorkflowImageModel(),
+          jobId: state.workflowJob?.id,
+          pageId: page.id,
+          extraPrompt: draft.extraPrompt,
+          canvasImage,
+          onscreenContent: draft.onscreenContent,
+          enableGeminiGoogleSearch: state.settings.enableGeminiGoogleSearch,
+        }),
+      });
+      if (data.page && state.workflowJob?.pages) {
+        state.workflowJob.pages = state.workflowJob.pages.map((item) => item.id === data.page.id ? data.page : item);
+        state.workflowJob = sanitizeRecoveredWorkflowJob(state.workflowJob);
+      }
+      prompt = String(data.finalPrompt || data.page?.promptTrace?.finalImage?.prompt || "").trim();
+      saveState();
+    } catch (error) {
+      if (isAbortError(error)) return;
+      setStatus(error.message || "准备提示词失败。", "error");
+      return;
+    } finally {
+      finishCancelableAction(requestKey);
+      renderPagesWorkbench();
+    }
+  }
+
+  if (!prompt) {
+    setStatus("当前页还没有可复制的最终提示词。", "error");
+    return;
+  }
+  try {
+    const ok = await copyTextToClipboard(prompt);
+    if (!ok) throw new Error("浏览器拒绝复制。");
+    setStatus(`第${page.pageNumber}页完整提示词已复制。`, "success");
+  } catch (error) {
+    setStatus(error.message || "复制提示词失败。", "error");
+  }
 }
 
 async function generateCurrentPage() {
