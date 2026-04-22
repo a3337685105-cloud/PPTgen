@@ -946,7 +946,11 @@ function getAiProcessingModeLabel(value) {
     const lines = ["【用户主文本】", mainText, "", "【参考材料】"];
     referenceFiles.forEach((file, index) => {
       lines.push(`文件 ${index + 1}：${file.name}（${file.category || "unknown"}）`);
-      lines.push(file.extractedText || file.previewText || "");
+      if (file.category === "image") {
+        lines.push("视觉参考图片：请只提取风格、材质、构图、颜色和主题物体线索，不要做 OCR，不要臆造图片中没有的信息。");
+      } else {
+        lines.push(file.extractedText || file.previewText || "");
+      }
       lines.push("");
     });
     return lines.join("\n");
@@ -977,6 +981,20 @@ function getAiProcessingModeLabel(value) {
     }
     if (!normalized.modelPrompt) {
       normalized.modelPrompt = [normalized.basic, normalized.cover, normalized.catalog, normalized.chapter, normalized.content, normalized.data].filter(Boolean).join("\n");
+    }
+    return normalized;
+  }
+
+  function normalizeThemeBasicDefinition(result, fallbackThemeName, decorationLevel, preferences) {
+    const normalized = normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, preferences);
+    normalized.cover = "";
+    normalized.catalog = "";
+    normalized.chapter = "";
+    normalized.content = "";
+    normalized.data = "";
+    normalized.modelPrompt = normalized.basic || normalized.modelPrompt;
+    if (!normalized.displaySummaryZh) {
+      normalized.displaySummaryZh = normalized.basic || (fallbackThemeName ? `主题：${fallbackThemeName}` : "已生成全局 Basic 风格。");
     }
     return normalized;
   }
@@ -1336,6 +1354,50 @@ function getAiProcessingModeLabel(value) {
     return {
       themeDefinition: normalizeThemeDefinition(result.parsed, themeName, decorationLevel, preferences),
       trace: { model: styleModel, systemPrompt: effectiveSystemPrompt, userPrompt: effectiveUserPrompt, responseText: result.text },
+    };
+  }
+
+  async function runThemeBasicDefinition(apiKey, region, themeName, decorationLevel, preferences, referenceFiles = [], context = {}) {
+    const safeThemeName = String(themeName || "").trim() || "AI 自动匹配成熟风格";
+    const contentContextBlock = [
+      context?.documentSummary ? `【内容摘要】\n${context.documentSummary}` : "",
+      context?.pagePlanSummary ? `【已拆分页计划】\n${context.pagePlanSummary}` : "",
+      context?.mainText ? `【用户原始内容】\n${String(context.mainText).slice(0, 6000)}` : "",
+    ].filter(Boolean).join("\n\n");
+    const systemPrompt = [
+      "你是一个 PPT 视觉总监，只负责生成全局 Basic 风格基底。",
+      "Basic 只定义整份演示的世界观、成熟风格基底、色彩气质、材质、字体层级、光影和统一负面约束。",
+      "不要生成 cover、catalog、chapter、content、data 等页面级模块；这些会在单页生成前根据页面内容即时生成。",
+      "只返回 JSON object，不要 markdown。字段必须包含 displaySummaryZh、modelPrompt、basic。",
+    ].join("\n");
+    const userPrompt = [
+      `【主题关键词】\n${safeThemeName}`,
+      `【装饰强度】\n${getDecorationLevelLabel(decorationLevel)}`,
+      buildPreferencePromptBlock(preferences),
+      contentContextBlock,
+      "【成熟风格选择】",
+      "请先从 Swiss Editorial、McKinsey Executive、Apple Keynote、Bloomberg Terminal Editorial、Museum Exhibition、Scientific Journal 中选择一个最适合作为基底，也可以融合两个，但不要罗列候选库。",
+      "【Basic 输出要求】",
+      "1. 使用专业中文，允许少量必要英文渲染术语，如 Octane Render、cinematic lighting。",
+      "2. 写成可直接拼进生图提示词的风格指令，不写成解释文档。",
+      "3. 只描述全局统一气质，不指定某一页的构图，不写目录页/内容页/数据页的具体排版。",
+      "4. 必须包含明确负面约束：禁止网页 UI、按钮控件、杂乱装饰、低对比文字、文字压在复杂纹理上。",
+      "返回 JSON：",
+      "{\"displaySummaryZh\":\"...\",\"modelPrompt\":\"...\",\"basic\":\"...\"}",
+    ].filter(Boolean).join("\n\n");
+
+    const styleModel = getWorkflowStyleModel();
+    const styleModelSupportsImages = modelSupportsImageInputs(styleModel);
+    const imageDataUrls = styleModelSupportsImages ? await loadReferenceImageDataUrls(referenceFiles) : [];
+    const result = await runAssistantJsonObject(apiKey, region, systemPrompt, userPrompt, "Basic主题基底", {
+      imageDataUrls,
+      model: styleModel,
+      temperature: 0.35,
+      transport: styleModelSupportsImages ? "dashscope-multimodal" : "compatible-chat",
+    });
+    return {
+      themeDefinition: normalizeThemeBasicDefinition(result.parsed, safeThemeName, decorationLevel, preferences),
+      trace: { model: styleModel, systemPrompt, userPrompt, responseText: result.text },
     };
   }
 
@@ -1728,6 +1790,7 @@ function getAiProcessingModeLabel(value) {
     const subject = keywords.join(", ") || String(page?.pageTitle || "topic").trim() || "topic";
     return {
       keywords,
+      visualElementBrief: subject,
       decorationPrompt: `Subtle visual metaphor based on ${subject}; use it only as a quiet background watermark or small physical accent, never as clutter.`,
       source: "heuristic",
     };
@@ -1739,10 +1802,13 @@ function getAiProcessingModeLabel(value) {
     if (!apiKey) return fallback;
 
     const systemPrompt = [
-      "You are a fast visual prompt assistant for PPT slide generation.",
-      "Extract only the most useful visual entities for the current slide.",
+      "You are a fast visual-element extractor for PPT slide image prompts.",
+      "Input includes the global Basic style and one slide's content.",
+      "Extract one concrete visual element that can support this slide without stealing attention from text.",
       "Return JSON object only, no markdown.",
-      "Fields: keywords (array of 1-3 short strings), decorationPrompt (one concise English sentence).",
+      "Fields: keywords (array of 1-3 short strings), visualElementBrief (3-12 words or one very short phrase), decorationPrompt (one concise English sentence).",
+      "visualElementBrief must name a physical object, material, structure, scene, diagram metaphor, or scientific/industrial motif. Do not output abstract words like innovation, quality, strategy.",
+      "Do not add unrelated animals, people, UI widgets, random charts, extra text, logos, or decorative clutter.",
     ].join("\n");
     const userPrompt = [
       "[Basic]",
@@ -1751,7 +1817,7 @@ function getAiProcessingModeLabel(value) {
       `type: ${page.pageType || "content"}`,
       `title: ${page.pageTitle || ""}`,
       `content: ${cleanOnscreenContent}`,
-      "Create a subtle decoration prompt. It must not add unrelated objects, UI widgets, charts, or extra text.",
+      "Extract the best visual element for this page. Keep it concise and concrete.",
     ].join("\n\n");
 
     try {
@@ -1766,8 +1832,12 @@ function getAiProcessingModeLabel(value) {
         : fallback.keywords;
       const decorationPrompt = stringifyStructuredField(result.parsed?.decorationPrompt || result.parsed?.decoration || "").trim()
         || fallback.decorationPrompt;
+      const visualElementBrief = stringifyStructuredField(result.parsed?.visualElementBrief || result.parsed?.visualElement || "").trim()
+        || fallback.visualElementBrief
+        || keywords.join(", ");
       return {
         keywords,
+        visualElementBrief,
         decorationPrompt,
         source: "llm",
         trace: { model: jitModel, systemPrompt, userPrompt, responseText: result.text },
@@ -1781,11 +1851,89 @@ function getAiProcessingModeLabel(value) {
     }
   }
 
+  function buildPageTypePromptModule(job, page, cleanOnscreenContent = "", visualElementBrief = "") {
+    const pageType = ["cover", "catalog", "chapter", "content", "data"].includes(page?.pageType) ? page.pageType : "content";
+    const moduleNames = {
+      cover: "Cover",
+      catalog: "Catalog",
+      chapter: "Chapter",
+      content: "Content",
+      data: "Data",
+    };
+    const layout = page.layoutMapping || deriveLayoutMapping(page, cleanOnscreenContent);
+    const wordCount = Number(layout.wordCount || page?.estimatedChars || countCharacters(cleanOnscreenContent));
+    const density = layout.density || normalizeContentBand(page?.contentBand, cleanOnscreenContent);
+    const visualElement = stringifyStructuredField(visualElementBrief || page?.jitDecoration?.visualElementBrief || page?.jitDecoration?.decorationPrompt || "").trim()
+      || "quiet subject-related material accent";
+    const typeRules = {
+      cover: {
+        composition: "建立单一主视觉焦点，标题区必须占据最清晰的阅读层级，副标题和元信息保持克制。",
+        container: "使用海报式标题安全区，背景视觉只能作为主题气质，不得抢走标题可读性。",
+        negative: "禁止目录、图表、卡片堆叠和多焦点拼贴。",
+      },
+      catalog: {
+        composition: "建立清晰的章节导航节奏，编号、章节名和短说明沿统一网格排列。",
+        container: "使用纵向议程、横向时间线或分栏目录容器，保持每个条目间距一致。",
+        negative: "禁止复杂插画压住章节文字，禁止无序漂浮标签。",
+      },
+      chapter: {
+        composition: "使用章节分隔页逻辑，大号序号或章节标题形成稳定锚点。",
+        container: "用大面积材质色块、留白和单一视觉符号切换叙事段落。",
+        negative: "禁止放入过多正文，禁止像内容页一样堆叠信息。",
+      },
+      data: {
+        composition: density === "high" || density === "very-high"
+          ? "构建高密度但严格对齐的数据仪表盘，结论数字、图表容器和注释区分层清楚。"
+          : "构建单一核心数据图表的英雄区，关键数字和结论优先于装饰。",
+        container: "图表、数字卡片、坐标轴、图例和注释必须拥有干净容器，阅读区与背景纹理分离。",
+        negative: "禁止伪造不可读的小字图表，禁止让装饰元素像真实数据一样误导读者。",
+      },
+      content: {
+        composition: density === "low"
+          ? "采用编辑型留白构图，一句核心观点配少量支撑信息和一个主题视觉隐喻。"
+          : density === "medium"
+            ? "采用双栏或三栏内容版式，正文、要点和视觉区保持清晰比例。"
+            : "采用 Bento 信息网格，把密集内容拆成成组卡片，避免小字墙。",
+        container: "标题、正文、要点和解释性图形各自进入独立阅读区，视觉元素作为辅助而不是主体。",
+        negative: "禁止把正文压在复杂背景上，禁止多余按钮、网页 UI 和无关装饰。",
+      },
+    };
+    const picked = typeRules[pageType] || typeRules.content;
+    return {
+      moduleKey: pageType,
+      moduleName: moduleNames[pageType] || "Content",
+      wordCount,
+      density,
+      visualElementBrief: visualElement,
+      modulePrompt: [
+        `[${moduleNames[pageType] || "Content"}]`,
+        `页面类型：${pageType}；内容量：${density}（约 ${wordCount} 字）。`,
+        `构图逻辑：${picked.composition}`,
+        `信息容器：${picked.container}`,
+        `本页视觉元素：${visualElement}。将它作为页面个性化的物理隐喻、结构水印或小型视觉锚点，必须服从全局 Basic 风格。`,
+        `负面约束：${picked.negative}`,
+      ].join("\n"),
+      source: "jit-local-page-map",
+    };
+  }
+
+  function attachPageTypePromptModule(job, page) {
+    if (!page.promptTrace || typeof page.promptTrace !== "object") page.promptTrace = {};
+    const cleanOnscreenContent = normalizeOnscreenContent(page.onscreenContentText || page.onscreenContent || page.pageContent);
+    const visualElement = page.jitDecoration?.visualElementBrief || page.jitDecoration?.decorationPrompt || "";
+    page.pageTypePromptModule = buildPageTypePromptModule(job, page, cleanOnscreenContent, visualElement);
+    page.promptTrace.pageTypeModule = page.pageTypePromptModule;
+    return page.pageTypePromptModule;
+  }
+
   function buildFinalImagePrompt(job, page, extraPrompt = "") {
     const cleanOnscreenContent = normalizeOnscreenContent(page.onscreenContentText || page.onscreenContent || page.pageContent);
-    const visualElementsPrompt = normalizeVisualElements(page.visualElementsPrompt || page.pageContent || "");
+    const visualElementsPrompt = normalizeVisualElements(page.visualElementsPrompt || page.pageTypePromptModule?.visualElementBrief || page.jitDecoration?.visualElementBrief || "");
     const pageTypeKey = ["cover", "catalog", "chapter", "content", "data"].includes(page.pageType) ? page.pageType : "content";
-    const pageTypeTemplate = job.themeDefinition?.[pageTypeKey] || "";
+    const pageTypeTemplate = page.pageTypePromptModule?.modulePrompt
+      || buildPageTypePromptModule(job, page, cleanOnscreenContent, page.jitDecoration?.visualElementBrief || "").modulePrompt
+      || job.themeDefinition?.[pageTypeKey]
+      || "";
     const pptLayoutPrinciples = buildPptLayoutPrinciplesBlock();
     const layoutInstruction = page.layoutInstruction || deriveLayoutMapping(page, cleanOnscreenContent).instruction;
     const decorationInstruction = page.jitDecoration?.decorationPrompt
@@ -1844,7 +1992,7 @@ function getAiProcessingModeLabel(value) {
             .map((page) => `${page.pageNumber}. [${page.pageType}] ${page.pageTitle}: ${stringifyStructuredField(page.pageContent).slice(0, 180)}`)
             .join("\n"),
       };
-      const result = await runThemeDefinition(
+      const result = await runThemeBasicDefinition(
         effectiveApiKey,
         region || DEFAULT_REGION,
         String(themeName || "").trim() || "AI 自动匹配成熟风格",
@@ -1871,7 +2019,7 @@ function getAiProcessingModeLabel(value) {
     try {
       const job = getWorkflowJobOrThrow(jobId);
       const normalizedPreferences = normalizePreferences(preferences);
-      job.themeDefinition = normalizeThemeDefinition(
+      job.themeDefinition = normalizeThemeBasicDefinition(
         themeDefinition || {},
         themeDefinition?.themeName || "AI 自动匹配成熟风格",
         decorationLevel || job.themeDefinition?.decorationLevel || DEFAULT_DECORATION_LEVEL,
@@ -1882,7 +2030,7 @@ function getAiProcessingModeLabel(value) {
       job.updatedAt = new Date().toISOString();
       return res.json({
         ok: true,
-        job: serializeWorkflowJob(job),
+        job: publicJobSnapshot(job),
       });
     } catch (error) {
       return res.status(error.status || 500).json({
@@ -1921,14 +2069,17 @@ function getAiProcessingModeLabel(value) {
 
     try {
       const normalizedPreferences = normalizePreferences(preferences);
-      const normalizedThemeDefinition = normalizeThemeDefinition(
+      const normalizedThemeDefinition = normalizeThemeBasicDefinition(
         themeDefinition || {},
         themeDefinition?.themeName || "",
         decorationLevel,
         normalizedPreferences,
       );
       const normalizedReferenceFiles = normalizeReferenceFiles(referenceFiles)
-        .filter((item) => item.includeInSplit && item.parseStatus === "parsed" && (item.extractedText || item.previewText));
+        .filter((item) => item.includeInSplit && (
+          (item.parseStatus === "parsed" && (item.extractedText || item.previewText))
+          || (item.category === "image" && item.parseStatus === "image" && (item.assetFileName || item.previewUrl))
+        ));
       const referenceDigestResult = await runReferenceDigest(
         effectiveApiKey,
         region || DEFAULT_REGION,
@@ -2144,9 +2295,11 @@ function getAiProcessingModeLabel(value) {
       page.promptTrace.jitDecoration = page.jitDecoration.trace || {
         source: page.jitDecoration.source,
         keywords: page.jitDecoration.keywords,
+        visualElementBrief: page.jitDecoration.visualElementBrief || "",
         decorationPrompt: page.jitDecoration.decorationPrompt,
         error: page.jitDecoration.error || "",
       };
+      attachPageTypePromptModule(job, page);
       const finalPrompt = buildFinalImagePrompt(job, page, String(extraPrompt || "").trim());
       page.generationStatus = "running";
       page.promptTrace.finalImage = {
@@ -2155,8 +2308,10 @@ function getAiProcessingModeLabel(value) {
         prompt: finalPrompt,
         extraPrompt: String(extraPrompt || "").trim(),
         layoutMapping: page.layoutMapping || null,
+        pageTypeModule: page.pageTypePromptModule || null,
         jitDecoration: {
           keywords: page.jitDecoration?.keywords || [],
+          visualElementBrief: page.jitDecoration?.visualElementBrief || "",
           decorationPrompt: page.jitDecoration?.decorationPrompt || "",
           source: page.jitDecoration?.source || "",
         },
@@ -2359,9 +2514,11 @@ function getAiProcessingModeLabel(value) {
       page.promptTrace.jitDecoration = page.jitDecoration.trace || {
         source: page.jitDecoration.source,
         keywords: page.jitDecoration.keywords,
+        visualElementBrief: page.jitDecoration.visualElementBrief || "",
         decorationPrompt: page.jitDecoration.decorationPrompt,
         error: page.jitDecoration.error || "",
       };
+      attachPageTypePromptModule(job, page);
       const finalPrompt = buildFinalImagePrompt(job, page, String(extraPrompt || "").trim());
       page.extraPrompt = String(extraPrompt || "").trim();
       page.promptTrace.finalImage = {
@@ -2370,8 +2527,10 @@ function getAiProcessingModeLabel(value) {
         prompt: finalPrompt,
         extraPrompt: String(extraPrompt || "").trim(),
         layoutMapping: page.layoutMapping || null,
+        pageTypeModule: page.pageTypePromptModule || null,
         jitDecoration: {
           keywords: page.jitDecoration?.keywords || [],
+          visualElementBrief: page.jitDecoration?.visualElementBrief || "",
           decorationPrompt: page.jitDecoration?.decorationPrompt || "",
           source: page.jitDecoration?.source || "",
         },
@@ -2411,9 +2570,11 @@ function getAiProcessingModeLabel(value) {
       page.promptTrace.jitDecoration = page.jitDecoration.trace || {
         source: page.jitDecoration.source,
         keywords: page.jitDecoration.keywords,
+        visualElementBrief: page.jitDecoration.visualElementBrief || "",
         decorationPrompt: page.jitDecoration.decorationPrompt,
         error: page.jitDecoration.error || "",
       };
+      attachPageTypePromptModule(job, page);
       const finalPrompt = buildFinalImagePrompt(job, page, String(extraPrompt || "").trim());
       page.generationStatus = "running";
       page.promptTrace.finalImage = {
@@ -2421,8 +2582,10 @@ function getAiProcessingModeLabel(value) {
         prompt: finalPrompt,
         extraPrompt: String(extraPrompt || "").trim(),
         layoutMapping: page.layoutMapping || null,
+        pageTypeModule: page.pageTypePromptModule || null,
         jitDecoration: {
           keywords: page.jitDecoration?.keywords || [],
+          visualElementBrief: page.jitDecoration?.visualElementBrief || "",
           decorationPrompt: page.jitDecoration?.decorationPrompt || "",
           source: page.jitDecoration?.source || "",
         },
