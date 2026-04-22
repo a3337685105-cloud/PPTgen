@@ -16,12 +16,38 @@ const GRSAI_WORKFLOW_IMAGE_MODELS = new Set([
 const DEFAULT_REGION = "beijing";
 const DEFAULT_DECORATION_LEVEL = "medium";
 const CONSTANTS_RULES = [
-  "Strictly follow CRAP design principles: Contrast, Repetition, Alignment, Proximity.",
-  "Ensure text is 100% legible against the background.",
-  "Keep all reading zones absolutely clean.",
-  "Do not overlap text with complex textures.",
-  "Use high contrast, precise alignment, and clear proximity grouping for every slide.",
+  "整份演示遵循对比、重复、对齐、亲密四项排版原则。",
+  "文字区保持清晰底色、稳定对比和明确层级。",
+  "装饰、材质和背景纹理服务阅读节奏，阅读区保持干净。",
+  "每页使用统一网格、精确对齐和清晰分组。",
 ].join(" ");
+
+const PAGE_TYPE_LABELS = {
+  cover: "封面页",
+  catalog: "目录页",
+  chapter: "章节页",
+  content: "内容页",
+  data: "数据页",
+};
+
+const PAGE_MODULE_NAMES = {
+  cover: "封面模块",
+  catalog: "目录模块",
+  chapter: "章节模块",
+  content: "内容模块",
+  data: "数据模块",
+};
+
+const DENSITY_LABELS = {
+  low: "低",
+  medium: "中",
+  high: "高",
+  "very-high": "很高",
+  minimal: "低",
+  balanced: "中",
+  standard: "中",
+  dense: "高",
+};
 
 const DEFAULT_PREFERENCES = {
   styleMode: "business",
@@ -652,20 +678,20 @@ function installWorkflowRoutes(app, deps) {
           {
             role: "system",
             content: [
-              "You are a JSON repair assistant.",
-              "Return valid JSON only.",
-              "Do not add markdown fences.",
-              "Preserve meaning from the input and normalize it into the target schema.",
+              "你是 JSON 修复助手。",
+              "只返回有效 JSON。",
+              "输出保持纯 JSON 文本。",
+              "保留输入含义，并整理为目标结构。",
             ].join(" "),
           },
           {
             role: "user",
             content: [
-              "Convert the following research output into JSON.",
-              "JSON schema:",
+              "把下面的联网补充结果转换成 JSON。",
+              "JSON 结构：",
               "{\"summary\":\"string\",\"candidates\":[{\"text\":\"string\",\"why\":\"string\",\"sources\":[{\"title\":\"string\",\"url\":\"https://...\"}]}]}",
-              "If no candidates are valid, return an empty candidates array.",
-              "Input:",
+              "没有有效候选内容时，返回空 candidates 数组。",
+              "输入：",
               String(rawText || ""),
             ].join("\n"),
           },
@@ -746,17 +772,16 @@ function installWorkflowRoutes(app, deps) {
 
   async function runExpansionResearch(apiKey, region, page, referenceDigest) {
     const prompt = [
-      "You are a lightweight web research assistant for PPT slide writing.",
-      "Use web search only for the exact topic of this PPT page.",
-      "Search the web and propose 0 to 4 factual supplements for expanding one slide.",
-      "Every supplement must be directly supported by sources and suitable for slide writing after human review.",
-      "Do not rewrite existing user text.",
-      "Do not invent organizations, authors, dates, numbers, conclusions, or background stories.",
-      "Prefer concise milestone facts, parameter ranges, short definitions, representative applications, or brief comparison points.",
-      "Candidate text must be in Simplified Chinese and should stay short.",
-      "If no reliable supplement is needed, return an empty candidates array.",
-      "Return pure JSON only. No markdown. No prose.",
-      "JSON schema:",
+      "你是用于演示文稿单页写作的轻量联网研究助手。",
+      "联网检索聚焦当前页面的精确主题。",
+      "请为扩展这一页提出零到四条事实补充。",
+      "每条补充都需要有来源支撑，并适合人工审核后写入幻灯片。",
+      "用户已有文字保持原意；补充内容基于可核验来源。",
+      "优先选择简洁里程碑事实、参数范围、短定义、代表性应用或简短对比点。",
+      "候选文字使用简体中文并保持简短。",
+      "没有可靠补充时，返回空 candidates 数组。",
+      "只返回纯 JSON。",
+      "JSON 结构：",
       "{\"summary\":\"...\",\"candidates\":[{\"text\":\"...\",\"why\":\"...\",\"sources\":[{\"title\":\"...\",\"url\":\"https://...\"}]}]}",
       "",
       `page_type: ${String(page?.pageType || "content")}`,
@@ -869,12 +894,12 @@ function getAiProcessingModeLabel(value) {
     return [
       "【全局主题模板】",
       themeDefinition.modelPrompt ? `模型总纲：${themeDefinition.modelPrompt}` : "",
-      themeDefinition.basic ? `Basic：${themeDefinition.basic}` : "",
-      themeDefinition.cover ? `Cover：${themeDefinition.cover}` : "",
-      themeDefinition.catalog ? `Catalog：${themeDefinition.catalog}` : "",
-      themeDefinition.chapter ? `Chapter：${themeDefinition.chapter}` : "",
-      themeDefinition.content ? `Content：${themeDefinition.content}` : "",
-      themeDefinition.data ? `Data：${themeDefinition.data}` : "",
+      themeDefinition.basic ? `基础风格：${themeDefinition.basic}` : "",
+      themeDefinition.cover ? `封面模块：${themeDefinition.cover}` : "",
+      themeDefinition.catalog ? `目录模块：${themeDefinition.catalog}` : "",
+      themeDefinition.chapter ? `章节模块：${themeDefinition.chapter}` : "",
+      themeDefinition.content ? `内容模块：${themeDefinition.content}` : "",
+      themeDefinition.data ? `数据模块：${themeDefinition.data}` : "",
       themeDefinition.decorationLevel ? `装饰强度：${getDecorationLevelLabel(themeDefinition.decorationLevel)}` : "",
     ].filter(Boolean).join("\n");
   }
@@ -882,11 +907,11 @@ function getAiProcessingModeLabel(value) {
   function buildHardConstraintBlock() {
     return [
       "【硬约束】",
-      "只允许使用用户主文本和参考材料明确支持的信息，禁止臆造事实。",
-      "装饰只限于无字图形、纹理、容器、线条、光效和图标，禁止新增 logo、水印、页码、角标或无关小字。",
+      "内容依据用户主文本和参考材料明确支持的信息组织。",
+      "装饰使用无字图形、纹理、容器、线条、光效和图标，服务页面阅读。",
       "页面主标题与页面主正文保持明显层级差，建议约 1.5-2 倍；二级和三级标题只做温和层级差。",
-      "避免把一整页内容压成密集小字墙；优先保留留白与可读性。",
-      "最终画面必须像 PPT 页面，而不是海报、长图或 UI 仪表盘。",
+      "一整页内容按分栏、分块、卡片化或图表化组织，保留留白与可读性。",
+      "最终画面呈现为可直接用于演示文稿的单页幻灯片。",
     ].join("\n");
   }
 
@@ -1257,106 +1282,6 @@ function getAiProcessingModeLabel(value) {
     return "";
   }
 
-  async function runThemeDefinition(apiKey, region, themeName, decorationLevel, preferences, referenceFiles = [], context = {}) {
-    themeName = String(themeName || "").trim() || "AI 自动匹配成熟风格";
-    const contentContextBlock = [
-      context?.documentSummary ? `【内容摘要】\n${context.documentSummary}` : "",
-      context?.pagePlanSummary ? `【已拆分页计划】\n${context.pagePlanSummary}` : "",
-      context?.mainText ? `【用户原始内容】\n${String(context.mainText).slice(0, 6000)}` : "",
-    ].filter(Boolean).join("\n\n");
-    const matureStyleBlock = [
-      "【成熟风格候选库】",
-      "请先根据内容自动选择最合适的一种作为基底，再叠加用户偏好：",
-      "1. Swiss Editorial：瑞士网格、清晰层级、克制留白，适合研究、咨询、商业汇报。",
-      "2. McKinsey Executive：高密度但有秩序的数据叙事，适合战略、市场、经营分析。",
-      "3. Apple Keynote：大留白、强主视觉、少字高质感，适合产品、品牌、发布。",
-      "4. Bloomberg Terminal Editorial：深色信息密度、精确图表、金融科技感，适合数据和趋势。",
-      "5. Museum Exhibition：展陈级叙事、材料质感、庄重文化感，适合历史、人文、艺术。",
-      "6. Scientific Journal：实验室白、精确注释、理性克制，适合学术、医疗、工程。",
-      "不要把候选库逐条罗列给用户，要把选择结果融合进最终主题模板。",
-    ].join("\n");
-    const systemPrompt = [
-      "你是一位专注 PPT 视觉表达的高级艺术总监及 UI/UX 专家。",
-"你的任务是为顶级生图大模型 Nano Banana 2 撰写极具画面感、物理质感的【中文】系统级提示词。",
-      "请只返回 JSON object，不要输出 markdown。",
-      "字段必须包含 displaySummaryZh、modelPrompt、basic、cover、catalog、chapter、content、data。",
-    ].join("\n");
-
-    const effectiveSystemPrompt = [
-      "你是一位精通 PPT 视觉设计、演示文稿美化与版式统筹的高级设计师。",
-      "你的任务是为顶级生图大模型 Nano Banana 2 撰写极具画面感、物理质感、并且严格服务于 PPT 场景的【中文】系统级提示词。",
-      "请只返回 JSON object，不要输出 markdown。",
-      "字段必须包含 displaySummaryZh、modelPrompt、basic、cover、catalog、chapter、content、data。",
-    ].join("\n");
-
-    const userPrompt = [
-`请为“${themeName}”设计全局主题模板。目标生图模型：Nano Banana 2。`,
-      `装饰强度：${getDecorationLevelLabel(decorationLevel)}`,
-      buildPreferencePromptBlock(preferences),
-      contentContextBlock,
-      matureStyleBlock,
-"【Nano Banana 2 模型专属特性要求】",
-      "1. 画面感极值：该模型对【材质】、【光影】和【渲染引擎】极其敏感。必须大量使用如“Octane Render渲染”、“虚幻引擎5”、“电影级光影”、“丁达尔效应”、“表面微磨砂”、“SSS次表面散射”等顶级CG行业术语。",
-      "2. 绝不用抽象词：该模型不懂“好看”、“干净”等抽象词汇。必须转化为物理描述，如“背景为无反光的摄影棚纯色背景”、“光线为顶部柔和漫反射”。",
-      "3. 负向约束明确：该模型容易“画蛇添足”，必须在提示词中强硬规定不准出现的内容（如：“绝不允许出现多余的UI元素、发光的赛博朋克线条或杂乱的3D碎屑”）。",
-      "【极其重要的输出格式与语言要求】",
-      "1. basic, cover, catalog, chapter, content, data 字段的输出【必须全部使用极其专业、富有画面感的中文】，绝不允许使用十六进制色号（如 #FFFFFF），英文仅限专业渲染术语（如 Octane Render）。",
-      "2. 颜色必须使用自然界或工业界的名词（如：钛银色、深海绿、实验室纯白）。",
-      "3. basic 字段的开头，必须使用角色扮演句式设定世界观。例如：“你是一位专注于 [某领域] 的平面设计视觉专家，请生成一份专业、高精度的16:9演示文稿。视觉风格融合...”",
-      "4. 各 PageType 字段，必须采用结构化的书写方式。必须包含：“构图逻辑：...”、“视觉焦点：...”、“负向约束：...”。",
-      "【排版与视觉原则（动态响应用户偏好）】",
-      "1. 秩序与层级：要求使用模块化网格系统，明确标题与正文呈现极端的视觉落差（如 1:0.618）。",
-      "2. 具象化的插图（关键！）：不要只谈排版。必须在各模块中，为模型提供具体的【物理插图隐喻】。必须让模型知道“具体画什么物体”。",
-      "3. 页面类型指南（根据偏好动态调整，以下为基准建议）：",
-      "   - cover: 确立唯一视觉焦点（如海报模式）。若偏好【视觉主导】，则放大3D主视觉物体；若偏好【内容主导/简约】，则克制图形，让超大标题占据重心。",
-      "   - catalog: 建立显性的纵向或横向阵列排布。依据【版式变化】偏好决定是规整列表还是创意散点阵列。",
-      "   - chapter: 色块或材质的巨大分割。利用巨大的序号作为实体水印或空间重塑的锚点。",
-      "   - content: 确立信息容器（如 Bento 便当盒或双栏网格）。若偏好【留白更多】，则采用极简物理底板；若偏好【信息更满】，则引入紧凑的卡片堆叠或仪表盘化背景。",
-      "   - data: 图表高精物理模型化。若偏好【适度信息图/清晰克制】，则如同无尘实验台上的实体；若偏好【更强视觉化】，可加入全息、发光光纤等具象化数据流表达。",
-      "返回 JSON：",
-      "{\"displaySummaryZh\":\"...\",\"modelPrompt\":\"...\",\"basic\":\"(必须输出纯中文描述)\",\"cover\":\"(必须输出纯中文描述)\",\"catalog\":\"(必须输出纯中文描述)\",\"chapter\":\"(必须输出纯中文描述)\",\"content\":\"(必须输出纯中文描述)\",\"data\":\"(必须输出纯中文描述)\"}",
-    ].join("\n\n");
-
-    const effectiveUserPrompt = [
-      `请为“${themeName}”设计全局主题模板。目标生图模型：Nano Banana 2。`,
-      `装饰强度：${getDecorationLevelLabel(decorationLevel)}`,
-      "【最高优先级】",
-      "必须严格继承用户提供的主题描述、配色倾向、字体气质、材质隐喻和风格问卷；这些信息要贯穿 displaySummaryZh、modelPrompt、basic、cover、catalog、chapter、content、data 全部字段。",
-      "如果用户已经明确指定了风格方向，不要被通用模板覆盖，不要改写成默认审美。",
-      buildPreferencePromptBlock(preferences),
-      contentContextBlock,
-      matureStyleBlock,
-      "【Nano Banana 2 表达要求】",
-      "1. 语言必须具体、可视、物理化，优先描述材质、光影、空间、镜头、渲染质感。",
-      "2. 避免抽象空话；把“高级、干净、好看”改写成可见画面描述。",
-      "3. 必须明确负向约束，禁止出现网页、UI 面板、仪表盘感、按钮控件、无关装饰和杂乱碎屑。",
-      "【输出要求】",
-      "1. 所有字段必须使用专业中文；不要使用十六进制色号；颜色请用自然、工业或材料命名。",
-      "2. basic 负责定义整套 PPT 的视觉世界观、版式秩序、字体层级、材质和气质，不要写成网页或 UI 设计说明。",
-      "3. cover、catalog、chapter、content、data 必须分别针对页型给出结构化提示，至少包含：构图逻辑、视觉焦点、信息容器或版式策略、负向约束。",
-      "【排版与视觉原则】",
-      "1. 使用模块化网格系统，标题与正文保持明确层级，字号比例按 1:0.618 控制。",
-      "2. 不要只谈排版；每个页型都要提供具体可画的物体、装置、结构或物理插图隐喻。",
-      "3. cover 强调单一焦点；catalog 强调阵列与浏览节奏；chapter 强调章节切割感；content 强调信息容器；data 强调数据图表的视觉化承载。",
-      "返回 JSON：",
-      "{\"displaySummaryZh\":\"...\",\"modelPrompt\":\"...\",\"basic\":\"...\",\"cover\":\"...\",\"catalog\":\"...\",\"chapter\":\"...\",\"content\":\"...\",\"data\":\"...\"}",
-    ].join("\n\n");
-
-    const styleModel = getWorkflowStyleModel();
-    const styleModelSupportsImages = modelSupportsImageInputs(styleModel);
-    const imageDataUrls = styleModelSupportsImages ? await loadReferenceImageDataUrls(referenceFiles) : [];
-    const result = await runAssistantJsonObject(apiKey, region, effectiveSystemPrompt, effectiveUserPrompt, "主题模板", {
-      imageDataUrls,
-      model: styleModel,
-      temperature: 0.35,
-      transport: styleModelSupportsImages ? "dashscope-multimodal" : "compatible-chat",
-    });
-    return {
-      themeDefinition: normalizeThemeDefinition(result.parsed, themeName, decorationLevel, preferences),
-      trace: { model: styleModel, systemPrompt: effectiveSystemPrompt, userPrompt: effectiveUserPrompt, responseText: result.text },
-    };
-  }
-
   async function runThemeBasicDefinition(apiKey, region, themeName, decorationLevel, preferences, referenceFiles = [], context = {}) {
     const safeThemeName = String(themeName || "").trim() || "AI 自动匹配成熟风格";
     const contentContextBlock = [
@@ -1365,10 +1290,10 @@ function getAiProcessingModeLabel(value) {
       context?.mainText ? `【用户原始内容】\n${String(context.mainText).slice(0, 6000)}` : "",
     ].filter(Boolean).join("\n\n");
     const systemPrompt = [
-      "你是一个 PPT 视觉总监，只负责生成全局 Basic 风格基底。",
-      "Basic 只定义整份演示的世界观、成熟风格基底、色彩气质、材质、字体层级、光影和统一负面约束。",
-      "不要生成 cover、catalog、chapter、content、data 等页面级模块；这些会在单页生成前根据页面内容即时生成。",
-      "只返回 JSON object，不要 markdown。字段必须包含 displaySummaryZh、modelPrompt、basic。",
+      "你是一个演示文稿视觉总监，只负责生成全局基础风格基底。",
+      "基础风格只定义整份演示的世界观、成熟风格基底、色彩气质、材质、字体层级、光影和统一视觉秩序。",
+      "本阶段仅生成基础风格字段；页面级模块会在单页生成前根据页面内容即时生成。",
+      "返回 JSON 对象，字段包含 displaySummaryZh、modelPrompt、basic。",
     ].join("\n");
     const userPrompt = [
       `【主题关键词】\n${safeThemeName}`,
@@ -1376,12 +1301,12 @@ function getAiProcessingModeLabel(value) {
       buildPreferencePromptBlock(preferences),
       contentContextBlock,
       "【成熟风格选择】",
-      "请先从 Swiss Editorial、McKinsey Executive、Apple Keynote、Bloomberg Terminal Editorial、Museum Exhibition、Scientific Journal 中选择一个最适合作为基底，也可以融合两个，但不要罗列候选库。",
-      "【Basic 输出要求】",
-      "1. 使用专业中文，允许少量必要英文渲染术语，如 Octane Render、cinematic lighting。",
+      "请先从瑞士编辑网格、咨询公司高管汇报、极简发布会、财经终端编辑风、博物馆展陈、科学期刊图版中选择一个最适合作为基底，也可以融合两个；输出时只呈现融合后的选择结果。",
+      "【基础风格输出要求】",
+      "1. 使用专业中文表达，渲染、材质、光影和镜头语言也尽量用中文描述。",
       "2. 写成可直接拼进生图提示词的风格指令，不写成解释文档。",
       "3. 只描述全局统一气质，不指定某一页的构图，不写目录页/内容页/数据页的具体排版。",
-      "4. 必须包含明确负面约束：禁止网页 UI、按钮控件、杂乱装饰、低对比文字、文字压在复杂纹理上。",
+      "4. 以正向语言说明文字清晰、结构克制、装饰有序、背景服务阅读。",
       "返回 JSON：",
       "{\"displaySummaryZh\":\"...\",\"modelPrompt\":\"...\",\"basic\":\"...\"}",
     ].filter(Boolean).join("\n\n");
@@ -1389,7 +1314,7 @@ function getAiProcessingModeLabel(value) {
     const styleModel = getWorkflowStyleModel();
     const styleModelSupportsImages = modelSupportsImageInputs(styleModel);
     const imageDataUrls = styleModelSupportsImages ? await loadReferenceImageDataUrls(referenceFiles) : [];
-    const result = await runAssistantJsonObject(apiKey, region, systemPrompt, userPrompt, "Basic主题基底", {
+    const result = await runAssistantJsonObject(apiKey, region, systemPrompt, userPrompt, "基础风格基底", {
       imageDataUrls,
       model: styleModel,
       temperature: 0.35,
@@ -1466,15 +1391,15 @@ function getAiProcessingModeLabel(value) {
       "每页只承载一个主题或一个完整思想单元。",
       "每页文字推荐 50-150 字，硬上限 200 字，超过 250 字视为 high 风险。",
       "优先按主题转换、逻辑递进、对比关系切页。",
-      "这里不要做最终上屏润色，不要为了美观偷删逻辑。",
+      "这里进行分页结构判断，最终上屏润色交给后续页面准备阶段，保留完整逻辑。",
       aiProcessingMode === "strict"
-        ? "Strict 模式：禁止扩写、禁止缩写、禁止改写语气。尽量保留用户原句，只做硬性分页、标题抽取和类型标记。"
+        ? "精确模式：保留用户原句、篇幅和语气，只做硬性分页、标题抽取和类型标记。"
         : "",
       aiProcessingMode === "balanced"
-        ? "Balanced 模式：允许轻度梳理逻辑、提炼小标题，但不要过度总结，也不要随意补充新事实。"
+        ? "均衡模式：轻度梳理逻辑、提炼小标题，事实范围保持在主文本和参考材料内。"
         : "",
       aiProcessingMode === "creative"
-        ? "Creative 模式：可以在不违背主文本主题的前提下，适度补全桥接句、案例提示和说明语气，让单页更完整。若参考材料明确支持，可引入其中的事实补充。"
+        ? "创作模式：在符合主文本主题和参考材料依据的前提下，适度补全桥接句、案例提示和说明语气，让单页更完整。若参考材料明确支持，可引入其中的事实补充。"
         : "",
       splitPreset ? `【本次拆分模板】\n${splitPreset}` : "",
       referenceDigest?.summary ? `【参考材料摘要】\n${referenceDigest.summary}` : "",
@@ -1649,47 +1574,49 @@ function getAiProcessingModeLabel(value) {
     const type = ["cover", "catalog", "chapter", "content", "data"].includes(pageType) ? pageType : "content";
     const table = {
       cover: {
-        layout: "poster cover layout with one dominant title zone, single visual focal object, generous negative space",
-        text: "large title, short subtitle, minimal supporting metadata",
+        layout: "海报式封面版式，单一主标题区，单一视觉焦点，充足留白",
+        text: "大标题、短副标题和少量辅助信息形成清晰层级",
       },
       catalog: {
-        layout: "structured agenda grid, numbered vertical rhythm, clear navigation hierarchy",
-        text: "short section labels with consistent alignment and spacing",
+        layout: "结构化议程网格，编号形成稳定节奏，章节导航清晰",
+        text: "短章节名、编号和说明文字保持统一对齐与间距",
       },
       chapter: {
-        layout: "chapter divider layout, oversized section number, strong material color block",
-        text: "one chapter title plus one concise transition line",
+        layout: "章节分隔版式，大号章节序号，明确材质色块",
+        text: "一个章节标题搭配一句简短过渡说明",
       },
       data: {
         layout: density === "high" || density === "very-high"
-          ? "dashboard style data layout, clear chart containers, high-density but aligned information grid"
-          : "single chart hero layout with precise annotation zones",
-        text: "numbers and conclusions must dominate labels; keep axis and legends legible",
+          ? "高密度数据网格，清晰图表容器，信息严格对齐"
+          : "单一核心图表英雄区，注释区位置精确",
+        text: "关键数字和结论优先呈现，坐标轴、图例和注释清晰可读",
       },
       content: {
         layout: density === "low"
-          ? "editorial feature layout, one key statement with supporting visual metaphor"
+          ? "编辑型重点版式，一个核心观点搭配支撑视觉隐喻"
           : density === "medium"
-            ? "two-column presentation layout, text column plus visual column, balanced whitespace"
-            : "Bento box UI grid, high-density text layout, grouped content cards with clean reading zones",
+            ? "双栏演示版式，文字栏与视觉栏保持平衡留白"
+            : "便当盒式信息网格，高密度文字分组成卡片阅读区",
         text: density === "low"
-          ? "headline and three short support points"
+          ? "标题和三条简短支撑要点"
           : density === "medium"
-            ? "section title, compact paragraph, 3-5 bullet points"
-            : "use cards, columns, and strict grouping to avoid small text walls",
+            ? "章节标题、紧凑段落和三到五条要点"
+            : "使用卡片、分栏和严格分组承载密集内容",
       },
     };
     const picked = table[type] || table.content;
+    const typeLabel = PAGE_TYPE_LABELS[type] || PAGE_TYPE_LABELS.content;
+    const densityLabel = DENSITY_LABELS[density] || density;
     return {
       type,
       wordCount,
       density,
       instruction: [
-        "[Layout]",
-        `Page type: ${type}. Word count band: ${density} (${wordCount}).`,
-        `Layout map: ${picked.layout}.`,
-        `Text hierarchy: ${picked.text}.`,
-        "Text areas must be separate from decorative visuals; never place text over busy imagery.",
+        "【版式映射】",
+        `页面类型：${typeLabel}；字数密度：${densityLabel}（约 ${wordCount} 字）。`,
+        `版式方案：${picked.layout}。`,
+        `文字层级：${picked.text}。`,
+        "阅读区：文字区与装饰区清晰分离，正文放在稳定底色区域。",
       ].join("\n"),
     };
   }
@@ -1764,16 +1691,14 @@ function getAiProcessingModeLabel(value) {
 
   function buildPptLayoutPrinciplesBlock() {
     return [
-      "[Constants_Rules]",
-      CONSTANTS_RULES,
       "【PPT排版原则｜高优先级】",
-      "对比：标题、结论、关键数字必须显著大于正文；标题与正文字号比例严格为 1:0.618。",
-      "对比：标题、结论、关键数字必须显著大于正文；标题与正文字号比例严格为 1:0.618。",
-      "亲密：相关内容靠近成组，无关内容主动拉开，避免信息粘连。",
+      CONSTANTS_RULES,
+      "对比：标题、结论和关键数字使用更高层级字号与字重；标题与正文形成稳定比例。",
+      "亲密：相关内容形成清晰分组，并保持稳定间距。",
       "对齐：文字、图形、卡片、数据区遵循统一网格与明确边线，保持秩序感。",
       "重复：同层级元素保持一致的字体、字重、颜色、间距与容器样式。",
-      "留白：保留呼吸感，内容过多时优先分栏、分块、卡片化或图表化，不压成小字墙。",
-      "可读：正文适合投影阅读，禁止细字、浅字、低对比文字压在复杂背景上。",
+      "留白：保留呼吸感，内容较多时优先分栏、分块、卡片化或图表化。",
+      "可读：正文适合投影阅读，文字区使用足够字号、清晰底色和稳定对比。",
     ].join("\n");
   }
 
@@ -1787,11 +1712,11 @@ function getAiProcessingModeLabel(value) {
         .slice(0, 8),
     ));
     const keywords = tokens.slice(0, 3);
-    const subject = keywords.join(", ") || String(page?.pageTitle || "topic").trim() || "topic";
+    const subject = keywords.join("、") || String(page?.pageTitle || "主题").trim() || "主题";
     return {
       keywords,
       visualElementBrief: subject,
-      decorationPrompt: `Subtle visual metaphor based on ${subject}; use it only as a quiet background watermark or small physical accent, never as clutter.`,
+      decorationPrompt: `${subject}形成浅层结构纹理和局部视觉锚点。`,
       source: "heuristic",
     };
   }
@@ -1802,27 +1727,27 @@ function getAiProcessingModeLabel(value) {
     if (!apiKey) return fallback;
 
     const systemPrompt = [
-      "You are a fast visual-element extractor for PPT slide image prompts.",
-      "Input includes the global Basic style and one slide's content.",
-      "Extract one concrete visual element that can support this slide without stealing attention from text.",
-      "Return JSON object only, no markdown.",
-      "Fields: keywords (array of 1-3 short strings), visualElementBrief (3-12 words or one very short phrase), decorationPrompt (one concise English sentence).",
-      "visualElementBrief must name a physical object, material, structure, scene, diagram metaphor, or scientific/industrial motif. Do not output abstract words like innovation, quality, strategy.",
-      "Do not add unrelated animals, people, UI widgets, random charts, extra text, logos, or decorative clutter.",
+      "你是演示文稿页面的快速视觉元素提取助手。",
+      "输入包含全局基础风格和单页内容。",
+      "请从当前页内容中提取一个具体、可画、能支撑阅读氛围的视觉元素。",
+      "返回 JSON 对象，字段包含 keywords、visualElementBrief、decorationPrompt。",
+      "keywords 是一到三个中文关键词；visualElementBrief 是几个词或一个很短的中文短语。",
+      "decorationPrompt 是一句中文装饰词条，适合放入页面模块，聚焦真实物体、材料、结构、场景、图解隐喻或行业符号。",
+      "输出保持简洁、具体、服务当前页主题。",
     ].join("\n");
     const userPrompt = [
-      "[Basic]",
+      "【基础风格】",
       stringifyStructuredField(job.themeDefinition?.basic || ""),
-      "[Page]",
-      `type: ${page.pageType || "content"}`,
-      `title: ${page.pageTitle || ""}`,
-      `content: ${cleanOnscreenContent}`,
-      "Extract the best visual element for this page. Keep it concise and concrete.",
+      "【当前页】",
+      `页面类型：${PAGE_TYPE_LABELS[page.pageType] || PAGE_TYPE_LABELS.content}`,
+      `标题：${page.pageTitle || ""}`,
+      `正文：${cleanOnscreenContent}`,
+      "请提取最适合这一页的装饰词条。",
     ].join("\n\n");
 
     try {
       const jitModel = getWorkflowJitModel();
-      const result = await runAssistantJsonObject(apiKey, region || DEFAULT_REGION, systemPrompt, userPrompt, "JIT page decoration", {
+      const result = await runAssistantJsonObject(apiKey, region || DEFAULT_REGION, systemPrompt, userPrompt, "单页装饰词条", {
         model: jitModel,
         temperature: 0.2,
         transport: modelSupportsImageInputs(jitModel) ? "dashscope-multimodal" : "compatible-chat",
@@ -1853,65 +1778,60 @@ function getAiProcessingModeLabel(value) {
 
   function buildPageTypePromptModule(job, page, cleanOnscreenContent = "", visualElementBrief = "") {
     const pageType = ["cover", "catalog", "chapter", "content", "data"].includes(page?.pageType) ? page.pageType : "content";
-    const moduleNames = {
-      cover: "Cover",
-      catalog: "Catalog",
-      chapter: "Chapter",
-      content: "Content",
-      data: "Data",
-    };
-    const layout = page.layoutMapping || deriveLayoutMapping(page, cleanOnscreenContent);
+    const moduleNames = PAGE_MODULE_NAMES;
+    const layout = deriveLayoutMapping(page, cleanOnscreenContent);
     const wordCount = Number(layout.wordCount || page?.estimatedChars || countCharacters(cleanOnscreenContent));
     const density = layout.density || normalizeContentBand(page?.contentBand, cleanOnscreenContent);
-    const visualElement = stringifyStructuredField(visualElementBrief || page?.jitDecoration?.visualElementBrief || page?.jitDecoration?.decorationPrompt || "").trim()
-      || "quiet subject-related material accent";
+    const typeLabel = PAGE_TYPE_LABELS[pageType] || PAGE_TYPE_LABELS.content;
+    const densityLabel = DENSITY_LABELS[density] || density;
+    const decorationEntry = stringifyStructuredField(
+      page?.jitDecoration?.decorationPrompt
+        || visualElementBrief
+        || page?.jitDecoration?.visualElementBrief
+        || "",
+    ).trim() || "与本页主题相关的材料纹理和结构线索。";
     const typeRules = {
       cover: {
         composition: "建立单一主视觉焦点，标题区必须占据最清晰的阅读层级，副标题和元信息保持克制。",
-        container: "使用海报式标题安全区，背景视觉只能作为主题气质，不得抢走标题可读性。",
-        negative: "禁止目录、图表、卡片堆叠和多焦点拼贴。",
+        container: "使用海报式标题安全区，背景视觉服务主题气质，标题保持清晰可读。",
       },
       catalog: {
         composition: "建立清晰的章节导航节奏，编号、章节名和短说明沿统一网格排列。",
         container: "使用纵向议程、横向时间线或分栏目录容器，保持每个条目间距一致。",
-        negative: "禁止复杂插画压住章节文字，禁止无序漂浮标签。",
       },
       chapter: {
         composition: "使用章节分隔页逻辑，大号序号或章节标题形成稳定锚点。",
         container: "用大面积材质色块、留白和单一视觉符号切换叙事段落。",
-        negative: "禁止放入过多正文，禁止像内容页一样堆叠信息。",
       },
       data: {
         composition: density === "high" || density === "very-high"
           ? "构建高密度但严格对齐的数据仪表盘，结论数字、图表容器和注释区分层清楚。"
           : "构建单一核心数据图表的英雄区，关键数字和结论优先于装饰。",
         container: "图表、数字卡片、坐标轴、图例和注释必须拥有干净容器，阅读区与背景纹理分离。",
-        negative: "禁止伪造不可读的小字图表，禁止让装饰元素像真实数据一样误导读者。",
       },
       content: {
         composition: density === "low"
           ? "采用编辑型留白构图，一句核心观点配少量支撑信息和一个主题视觉隐喻。"
           : density === "medium"
             ? "采用双栏或三栏内容版式，正文、要点和视觉区保持清晰比例。"
-            : "采用 Bento 信息网格，把密集内容拆成成组卡片，避免小字墙。",
-        container: "标题、正文、要点和解释性图形各自进入独立阅读区，视觉元素作为辅助而不是主体。",
-        negative: "禁止把正文压在复杂背景上，禁止多余按钮、网页 UI 和无关装饰。",
+            : "采用便当盒式信息网格，把密集内容拆成成组卡片。",
+        container: "标题、正文、要点和解释性图形各自进入独立阅读区，整体保留清晰比例和稳定间距。",
       },
     };
     const picked = typeRules[pageType] || typeRules.content;
     return {
       moduleKey: pageType,
-      moduleName: moduleNames[pageType] || "Content",
+      moduleName: moduleNames[pageType] || moduleNames.content,
       wordCount,
       density,
-      visualElementBrief: visualElement,
+      visualElementBrief: decorationEntry,
+      decorationEntry,
       modulePrompt: [
-        `[${moduleNames[pageType] || "Content"}]`,
-        `页面类型：${pageType}；内容量：${density}（约 ${wordCount} 字）。`,
+        `【${moduleNames[pageType] || moduleNames.content}】`,
+        `页面类型：${typeLabel}；内容量：${densityLabel}（约 ${wordCount} 字）。`,
         `构图逻辑：${picked.composition}`,
         `信息容器：${picked.container}`,
-        `本页视觉元素：${visualElement}。将它作为页面个性化的物理隐喻、结构水印或小型视觉锚点，必须服从全局 Basic 风格。`,
-        `负面约束：${picked.negative}`,
+        `装饰词条：${decorationEntry}`,
       ].join("\n"),
       source: "jit-local-page-map",
     };
@@ -1928,26 +1848,21 @@ function getAiProcessingModeLabel(value) {
 
   function buildFinalImagePrompt(job, page, extraPrompt = "") {
     const cleanOnscreenContent = normalizeOnscreenContent(page.onscreenContentText || page.onscreenContent || page.pageContent);
-    const visualElementsPrompt = normalizeVisualElements(page.visualElementsPrompt || page.pageTypePromptModule?.visualElementBrief || page.jitDecoration?.visualElementBrief || "");
-    const pageTypeKey = ["cover", "catalog", "chapter", "content", "data"].includes(page.pageType) ? page.pageType : "content";
+    const layout = deriveLayoutMapping(page, cleanOnscreenContent);
+    page.layoutMapping = layout;
+    page.layoutInstruction = layout.instruction;
     const pageTypeTemplate = page.pageTypePromptModule?.modulePrompt
       || buildPageTypePromptModule(job, page, cleanOnscreenContent, page.jitDecoration?.visualElementBrief || "").modulePrompt
-      || job.themeDefinition?.[pageTypeKey]
       || "";
     const pptLayoutPrinciples = buildPptLayoutPrinciplesBlock();
-    const layoutInstruction = page.layoutInstruction || deriveLayoutMapping(page, cleanOnscreenContent).instruction;
-    const decorationInstruction = page.jitDecoration?.decorationPrompt
-      ? `[Decoration]\n${page.jitDecoration.decorationPrompt}`
-      : "";
+    const layoutInstruction = layout.instruction;
     return [
       job.themeDefinition?.basic || "",
       pptLayoutPrinciples,
       pageTypeTemplate,
       layoutInstruction,
-      decorationInstruction,
       `本页标题：${page.pageTitle}`,
       cleanOnscreenContent ? `以下是我的文字内容：\n${cleanOnscreenContent}` : "",
-      visualElementsPrompt ? `画面补充建议：\n${visualElementsPrompt}` : "",
       extraPrompt ? `补充要求：\n${normalizeOnscreenContent(extraPrompt)}` : "",
     ].filter(Boolean).join("\n\n");
   }
@@ -2313,6 +2228,7 @@ function getAiProcessingModeLabel(value) {
           keywords: page.jitDecoration?.keywords || [],
           visualElementBrief: page.jitDecoration?.visualElementBrief || "",
           decorationPrompt: page.jitDecoration?.decorationPrompt || "",
+          decorationEntry: page.pageTypePromptModule?.decorationEntry || page.jitDecoration?.decorationPrompt || "",
           source: page.jitDecoration?.source || "",
         },
         hasCanvasImage: Boolean(canvasImage),
@@ -2532,6 +2448,7 @@ function getAiProcessingModeLabel(value) {
           keywords: page.jitDecoration?.keywords || [],
           visualElementBrief: page.jitDecoration?.visualElementBrief || "",
           decorationPrompt: page.jitDecoration?.decorationPrompt || "",
+          decorationEntry: page.pageTypePromptModule?.decorationEntry || page.jitDecoration?.decorationPrompt || "",
           source: page.jitDecoration?.source || "",
         },
         hasCanvasImage: Boolean(canvasImage),
@@ -2587,6 +2504,7 @@ function getAiProcessingModeLabel(value) {
           keywords: page.jitDecoration?.keywords || [],
           visualElementBrief: page.jitDecoration?.visualElementBrief || "",
           decorationPrompt: page.jitDecoration?.decorationPrompt || "",
+          decorationEntry: page.pageTypePromptModule?.decorationEntry || page.jitDecoration?.decorationPrompt || "",
           source: page.jitDecoration?.source || "",
         },
         hasCanvasImage: Boolean(canvasImage),

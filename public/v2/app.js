@@ -86,12 +86,12 @@ const ASPECT_META = {
 
 const WORKFLOW_PROJECTS_VERSION = 1;
 const THEME_PROMPT_SECTIONS = [
-  { key: "basic", label: "Basic" },
-  { key: "cover", label: "Cover" },
-  { key: "catalog", label: "Catalog" },
-  { key: "chapter", label: "Chapter" },
-  { key: "content", label: "Content" },
-  { key: "data", label: "Data" },
+  { key: "basic", label: "基础风格" },
+  { key: "cover", label: "封面模块" },
+  { key: "catalog", label: "目录模块" },
+  { key: "chapter", label: "章节模块" },
+  { key: "content", label: "内容模块" },
+  { key: "data", label: "数据模块" },
   { key: "modelPrompt", label: "总纲" },
 ];
 
