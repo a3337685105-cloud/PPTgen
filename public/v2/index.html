@@ -240,21 +240,13 @@
                       <label class="field">
                         <span>AI 处理模式</span>
                         <select id="aiProcessingMode">
-                          <option value="strict">Strict · 原汁原味</option>
-                          <option value="balanced">Balanced · 适度润色</option>
-                          <option value="creative">Creative · 深度扩写</option>
+                          <option value="expand">拆分并扩写</option>
+                          <option value="split">仅拆分</option>
                         </select>
-                      </label>
-                      <label class="field split-toggle-field">
-                        <span>内容扩展</span>
-                        <div class="toggle-inline">
-                          <input id="workflowEnableExpansion" type="checkbox" />
-                          <span>需要有依据扩写</span>
-                        </div>
                       </label>
                       <label class="field">
                         <span>每页目标字数</span>
-                        <input id="workflowTargetChars" type="number" min="0" max="300" placeholder="勾选扩写后启用" />
+                        <input id="workflowTargetChars" type="number" min="0" max="300" placeholder="选择“拆分并扩写”后启用" />
                       </label>
                       <label class="field">
                         <span>每页最大字数</span>
@@ -262,7 +254,7 @@
                       </label>
                     </div>
                     <p class="card-copy split-capability-copy">
-                      长文本会先按目标页数拆开；超过上限的页面会自动压缩。勾选扩写后，内容不足的页面会基于搜索结果补到目标字数。
+                      长文本会先按目标页数拆开；超过上限的页面会自动压缩。选择“拆分并扩写”时，内容不足的页面会补到目标字数；选择“仅拆分”时，则按原文本直接拆分。
                     </p>
                     <label class="field field-stack">
                       <span>主文本</span>
@@ -346,15 +338,12 @@
                       <button class="btn ghost cancel-btn" type="button" id="cancelGenerateCurrentPageBtn" hidden>取消</button>
                       <button class="btn secondary" type="button" id="viewCurrentPageLargeBtn" disabled>查看大图</button>
                       <button class="btn secondary" type="button" id="copyPagePromptBtn" disabled>复制提示词</button>
+                      <button class="btn secondary" type="button" id="modifyCurrentPageBtn" disabled>按要求修改</button>
                       <button class="btn primary" type="button" id="generateCurrentPageBtn">生成该页</button>
                     </div>
-                    <label class="field field-stack" id="gptPageStyleField" hidden>
-                      <span>GPT 该页风格提示词</span>
-                      <textarea id="gptPageStylePrompt" rows="4" placeholder="例如：浅色风格，更加艺术化，颜色要求使用浅蓝和银灰，版面通透。"></textarea>
-                    </label>
                     <label class="field field-stack" id="pageExtraPromptField">
-                      <span>额外要求 / 该页修改提示词</span>
-                      <textarea id="pageExtraPrompt" rows="5" placeholder="例如：第一次生成时希望更简洁，或这页改成更强的数据对比感。"></textarea>
+                      <span>该页提示词</span>
+                      <textarea id="pageExtraPrompt" rows="5" placeholder="例如：第一次生成时希望更简洁；或生成后希望改成更强的数据对比感。"></textarea>
                     </label>
                     <details class="trace-details">
                       <summary>查看这一页的 Prompt 流转</summary>

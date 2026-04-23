@@ -49,9 +49,8 @@ const PREFERENCE_PROMPT_KEYS = {
 };
 
 const AI_PROCESSING_MODE_LABELS = {
-  strict: "Strict · 原汁原味",
-  balanced: "Balanced · 适度润色",
-  creative: "Creative · 深度扩写",
+  expand: "拆分并扩写",
+  split: "仅拆分",
 };
 
 const PAGE_TYPE_META = {
@@ -101,12 +100,6 @@ const ASPECT_META = {
 const WORKFLOW_PROJECTS_VERSION = 1;
 const THEME_PROMPT_SECTIONS = [
   { key: "basic", label: "基础风格" },
-  { key: "cover", label: "封面模块" },
-  { key: "catalog", label: "目录模块" },
-  { key: "chapter", label: "章节模块" },
-  { key: "content", label: "内容模块" },
-  { key: "data", label: "数据模块" },
-  { key: "modelPrompt", label: "总纲" },
 ];
 
 const state = {
@@ -146,8 +139,8 @@ const state = {
   themeConfirmed: false,
   workflowContent: "",
   workflowPageCount: 8,
-  aiProcessingMode: "balanced",
-  workflowEnableExpansion: false,
+  aiProcessingMode: "expand",
+  workflowEnableExpansion: true,
   workflowTargetChars: 0,
   workflowMaxChars: 200,
   splitPresetId: "",
@@ -271,6 +264,7 @@ function cacheElements() {
     "overlayLayer",
     "generateCurrentPageBtn",
     "cancelGenerateCurrentPageBtn",
+    "modifyCurrentPageBtn",
     "gptPageStyleField",
     "gptPageStylePrompt",
     "pageExtraPromptField",
@@ -343,6 +337,18 @@ function safeJsonParse(text) {
   } catch {
     return null;
   }
+}
+
+function normalizeAiProcessingModeValue(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "expand" || normalized === "split") return normalized;
+  if (normalized === "strict") return "split";
+  if (normalized === "balanced" || normalized === "creative") return "expand";
+  return "expand";
+}
+
+function aiProcessingModeUsesExpansion(mode = state.aiProcessingMode) {
+  return normalizeAiProcessingModeValue(mode) === "expand";
 }
 
 function setStatus(message, tone = "idle") {
@@ -479,8 +485,8 @@ function buildProjectSnapshot(job) {
     preferences: { ...state.preferences },
     workflowContent: state.workflowContent,
     workflowPageCount: state.workflowPageCount,
-    aiProcessingMode: state.aiProcessingMode,
-    workflowEnableExpansion: state.workflowEnableExpansion,
+  aiProcessingMode: state.aiProcessingMode,
+  workflowEnableExpansion: aiProcessingModeUsesExpansion(state.aiProcessingMode),
     workflowTargetChars: state.workflowTargetChars,
     workflowMaxChars: state.workflowMaxChars,
     parsedFiles: Array.isArray(state.parsedFiles) ? state.parsedFiles : [],
@@ -512,6 +518,7 @@ function serializePageDraftsForStorage() {
       onscreenContent: draft.onscreenContent || "",
       sourceOnscreenTitle: draft.sourceOnscreenTitle || "",
       sourceOnscreenContent: draft.sourceOnscreenContent || "",
+      sharedPrompt: draft.sharedPrompt || draft.extraPrompt || draft.pageStylePrompt || "",
       extraPrompt: draft.extraPrompt || "",
       pageStylePrompt: draft.pageStylePrompt || "",
       overlays: (draft.overlays || []).filter((item) => /^https?:\/\//i.test(item.src) || item.src.startsWith("/generated-images/")),
@@ -536,8 +543,8 @@ function saveState() {
     themeConfirmed: state.themeConfirmed,
     workflowContent: state.workflowContent,
     workflowPageCount: state.workflowPageCount,
-    aiProcessingMode: state.aiProcessingMode,
-    workflowEnableExpansion: state.workflowEnableExpansion,
+  aiProcessingMode: state.aiProcessingMode,
+  workflowEnableExpansion: aiProcessingModeUsesExpansion(state.aiProcessingMode),
     workflowTargetChars: state.workflowTargetChars,
     workflowMaxChars: state.workflowMaxChars,
     splitPresetId: state.splitPresetId,
@@ -574,8 +581,8 @@ function loadState() {
   state.themeConfirmed = Boolean(parsed.themeConfirmed);
   state.workflowContent = String(parsed.workflowContent || "");
   state.workflowPageCount = clamp(Number(parsed.workflowPageCount || 8), 2, 120);
-  state.aiProcessingMode = ["strict", "balanced", "creative"].includes(parsed.aiProcessingMode) ? parsed.aiProcessingMode : "balanced";
-  state.workflowEnableExpansion = Boolean(parsed.workflowEnableExpansion);
+  state.aiProcessingMode = normalizeAiProcessingModeValue(parsed.aiProcessingMode);
+  state.workflowEnableExpansion = aiProcessingModeUsesExpansion(state.aiProcessingMode);
   state.workflowTargetChars = clamp(Number(parsed.workflowTargetChars || 0), 0, 300);
   state.workflowMaxChars = clamp(Number(parsed.workflowMaxChars || 200), 0, 400);
   state.splitPresetId = "";
@@ -606,8 +613,7 @@ function applyStateToUi() {
   el.prefDataNarrative.value = state.preferences.dataNarrative;
   el.prefPageMood.value = state.preferences.pageMood;
   el.workflowPageCount.value = String(state.workflowPageCount);
-  el.aiProcessingMode.value = state.aiProcessingMode;
-  if (el.workflowEnableExpansion) el.workflowEnableExpansion.checked = Boolean(state.workflowEnableExpansion);
+  el.aiProcessingMode.value = normalizeAiProcessingModeValue(state.aiProcessingMode);
   if (el.workflowTargetChars) el.workflowTargetChars.value = state.workflowTargetChars ? String(state.workflowTargetChars) : "";
   if (el.workflowMaxChars) el.workflowMaxChars.value = state.workflowMaxChars ? String(state.workflowMaxChars) : "";
   el.workflowContent.value = state.workflowContent;
@@ -638,13 +644,11 @@ function applyStateToUi() {
 }
 
 function syncSplitExpansionControls() {
-  const enabled = Boolean(state.workflowEnableExpansion);
-  if (el.workflowEnableExpansion) {
-    el.workflowEnableExpansion.checked = enabled;
-  }
+  const enabled = aiProcessingModeUsesExpansion(state.aiProcessingMode);
+  state.workflowEnableExpansion = enabled;
   if (el.workflowTargetChars) {
     el.workflowTargetChars.disabled = !enabled;
-    el.workflowTargetChars.placeholder = enabled ? "例如 180" : "勾选扩写后启用";
+    el.workflowTargetChars.placeholder = enabled ? "例如 180" : "选择“拆分并扩写”后启用";
     el.workflowTargetChars.closest(".field")?.classList.toggle("is-disabled", !enabled);
   }
 }
@@ -954,9 +958,25 @@ function sanitizeDirectionalThemeText(text) {
 function sanitizeRecoveredThemeDefinition(themeDefinition) {
   if (!themeDefinition || typeof themeDefinition !== "object") return themeDefinition;
   const normalized = { ...themeDefinition };
-  ["displaySummaryZh", "modelPrompt", "basic", "cover", "catalog", "chapter", "content", "data"].forEach((key) => {
+  ["displaySummaryZh", "basic"].forEach((key) => {
     normalized[key] = sanitizeDirectionalThemeText(normalized[key] || "");
   });
+  normalized.modelPrompt = "";
+  normalized.archivedLegacyThemeModules = {
+    cover: sanitizeDirectionalThemeText(normalized.cover || ""),
+    catalog: sanitizeDirectionalThemeText(normalized.catalog || ""),
+    chapter: sanitizeDirectionalThemeText(normalized.chapter || ""),
+    content: sanitizeDirectionalThemeText(normalized.content || ""),
+    data: sanitizeDirectionalThemeText(normalized.data || ""),
+  };
+  normalized.cover = "";
+  normalized.catalog = "";
+  normalized.chapter = "";
+  normalized.content = "";
+  normalized.data = "";
+  if (!normalized.displaySummaryZh) {
+    normalized.displaySummaryZh = normalized.basic || "";
+  }
   return normalized;
 }
 
@@ -974,6 +994,7 @@ function sanitizeRecoveredWorkflowJob(job) {
     if (!normalizedPage.onscreenContent && normalizedPage.onscreenContentText) {
       normalizedPage.onscreenContent = normalizedPage.onscreenContentText;
     }
+    normalizedPage.sharedPrompt = String(normalizedPage.sharedPrompt || normalizedPage.extraPrompt || normalizedPage.pageStylePrompt || "");
     normalizedPage.visualElementsPrompt = String(normalizedPage.visualElementsPrompt || "");
     normalizedPage.visualElementsDisplay = String(normalizedPage.visualElementsDisplay || normalizedPage.visualElementsPrompt || "");
     normalizedPage.pageStylePrompt = String(normalizedPage.pageStylePrompt || "");
@@ -1004,6 +1025,10 @@ function isPageGenerating(pageId) {
   return activeRequests.has(getPageGenerateRequestKey(pageId));
 }
 
+function getCurrentSharedPromptValue() {
+  return String(el.pageExtraPrompt?.value || "").trim();
+}
+
 function ensurePageDraft(page) {
   if (!page) return null;
   const canonicalContent = formatOnscreenPreview(page.onscreenContentText || page.onscreenContent || page.pageContent || "");
@@ -1015,6 +1040,7 @@ function ensurePageDraft(page) {
       onscreenContent: composeOnscreenContentFromEditors(canonicalSplit.title, canonicalSplit.body),
       sourceOnscreenTitle: canonicalSplit.title,
       sourceOnscreenContent: composeOnscreenContentFromEditors(canonicalSplit.title, canonicalSplit.body),
+      sharedPrompt: page.sharedPrompt || page.extraPrompt || page.pageStylePrompt || "",
       extraPrompt: page.extraPrompt || "",
       pageStylePrompt: page.pageStylePrompt || "",
       overlays: [],
@@ -1043,6 +1069,12 @@ function ensurePageDraft(page) {
   }
   if (!state.pageDrafts[page.id].extraPrompt && page.extraPrompt) {
     state.pageDrafts[page.id].extraPrompt = page.extraPrompt;
+  }
+  if (typeof state.pageDrafts[page.id].sharedPrompt !== "string") {
+    state.pageDrafts[page.id].sharedPrompt = state.pageDrafts[page.id].extraPrompt || state.pageDrafts[page.id].pageStylePrompt || "";
+  }
+  if (!state.pageDrafts[page.id].sharedPrompt && (page.sharedPrompt || page.extraPrompt || page.pageStylePrompt)) {
+    state.pageDrafts[page.id].sharedPrompt = page.sharedPrompt || page.extraPrompt || page.pageStylePrompt || "";
   }
   if (typeof state.pageDrafts[page.id].pageStylePrompt !== "string") {
     state.pageDrafts[page.id].pageStylePrompt = "";
@@ -1093,9 +1125,7 @@ function updateThemeView() {
   el.confirmThemeBtn.disabled = !state.themeDefinition;
   el.goSplitBtn.disabled = !isStandardWorkflowThemeReady();
   el.themeSummaryPreview.textContent = state.themeDefinition?.displaySummaryZh || "风格摘要会显示在这里。";
-  el.themeModelPrompt.textContent = state.themePromptTrace
-    ? stringifyTrace(state.themePromptTrace)
-    : (state.themeDefinition?.modelPrompt || "还没有生成模型总纲。");
+  el.themeModelPrompt.textContent = state.themeDefinition?.basic || "还没有生成基础风格。";
 }
 
 function renderThemePromptModules() {
@@ -1245,8 +1275,8 @@ function restoreHistoryProject() {
   state.preferences = { ...DEFAULT_PREFERENCES, ...(snapshot.preferences || {}) };
   state.workflowContent = snapshot.workflowContent || "";
   state.workflowPageCount = clamp(Number(snapshot.workflowPageCount || 8), 2, 120);
-  state.aiProcessingMode = ["strict", "balanced", "creative"].includes(snapshot.aiProcessingMode) ? snapshot.aiProcessingMode : "balanced";
-  state.workflowEnableExpansion = Boolean(snapshot.workflowEnableExpansion);
+  state.aiProcessingMode = normalizeAiProcessingModeValue(snapshot.aiProcessingMode);
+  state.workflowEnableExpansion = aiProcessingModeUsesExpansion(state.aiProcessingMode);
   state.workflowTargetChars = clamp(Number(snapshot.workflowTargetChars || 0), 0, 300);
   state.workflowMaxChars = clamp(Number(snapshot.workflowMaxChars || 200), 0, 400);
   state.parsedFiles = Array.isArray(snapshot.parsedFiles) ? snapshot.parsedFiles : [];
@@ -2383,11 +2413,8 @@ function bindEvents() {
     saveState();
   });
   el.aiProcessingMode.addEventListener("change", () => {
-    state.aiProcessingMode = el.aiProcessingMode.value || "balanced";
-    saveState();
-  });
-  el.workflowEnableExpansion?.addEventListener("change", () => {
-    state.workflowEnableExpansion = Boolean(el.workflowEnableExpansion.checked);
+    state.aiProcessingMode = normalizeAiProcessingModeValue(el.aiProcessingMode.value);
+    state.workflowEnableExpansion = aiProcessingModeUsesExpansion(state.aiProcessingMode);
     syncSplitExpansionControls();
     saveState();
   });
@@ -2407,15 +2434,21 @@ function bindEvents() {
     const page = getSelectedPage();
     const draft = ensurePageDraft(page);
     if (!draft) return;
+    draft.sharedPrompt = el.pageExtraPrompt.value;
     draft.extraPrompt = el.pageExtraPrompt.value;
+    draft.pageStylePrompt = el.pageExtraPrompt.value;
     saveState();
+    syncCurrentPageGenerateUi();
   });
   el.gptPageStylePrompt?.addEventListener("input", () => {
     const page = getSelectedPage();
     const draft = ensurePageDraft(page);
     if (!draft) return;
+    draft.sharedPrompt = el.gptPageStylePrompt.value;
     draft.pageStylePrompt = el.gptPageStylePrompt.value;
+    draft.extraPrompt = el.gptPageStylePrompt.value;
     saveState();
+    syncCurrentPageGenerateUi();
   });
   el.repreparePageBtn.addEventListener("click", reprepareCurrentPage);
   el.aiRepolishPageBtn.addEventListener("click", aiRepolishCurrentPage);
@@ -2426,6 +2459,7 @@ function bindEvents() {
   el.overlayFileInput.addEventListener("change", handleOverlayFiles);
   el.clearOverlayBtn.addEventListener("click", clearCurrentOverlays);
   el.generateCurrentPageBtn.addEventListener("click", generateCurrentPage);
+  el.modifyCurrentPageBtn?.addEventListener("click", modifyCurrentPage);
   el.copyPagePromptBtn?.addEventListener("click", copyCurrentPagePrompt);
   el.viewCurrentPageLargeBtn?.addEventListener("click", openCurrentPageLargeImage);
   el.exportWorkflowPptBtn?.addEventListener("click", exportWorkflowPpt);
@@ -2618,11 +2652,11 @@ async function runSplit() {
   setWorkflowImageModel(el.workflowImageModelEntry?.value || el.workflowImageModel?.value || state.settings.workflowImageModel || PPT_MODEL);
   state.workflowContent = el.workflowContent.value.trim();
   state.workflowPageCount = clamp(Number(el.workflowPageCount.value || 8), 2, 120);
-  state.aiProcessingMode = el.aiProcessingMode.value || "balanced";
-  state.workflowEnableExpansion = Boolean(el.workflowEnableExpansion?.checked);
+  state.aiProcessingMode = normalizeAiProcessingModeValue(el.aiProcessingMode.value);
+  state.workflowEnableExpansion = aiProcessingModeUsesExpansion(state.aiProcessingMode);
   state.workflowTargetChars = clamp(Number(el.workflowTargetChars?.value || 0), 0, 300);
   state.workflowMaxChars = clamp(Number(el.workflowMaxChars?.value || 200), 0, 400);
-  if (state.workflowEnableExpansion && state.workflowTargetChars && state.workflowMaxChars && state.workflowTargetChars > state.workflowMaxChars) {
+  if (aiProcessingModeUsesExpansion(state.aiProcessingMode) && state.workflowTargetChars && state.workflowMaxChars && state.workflowTargetChars > state.workflowMaxChars) {
     state.workflowTargetChars = state.workflowMaxChars;
     if (el.workflowTargetChars) el.workflowTargetChars.value = String(state.workflowTargetChars);
   }
@@ -2664,8 +2698,8 @@ async function runSplit() {
         pageCount: state.workflowPageCount,
         splitTemplate: "",
         aiProcessingMode: state.aiProcessingMode,
-        enableExpansion: state.workflowEnableExpansion,
-        targetChars: state.workflowEnableExpansion ? state.workflowTargetChars : 0,
+        enableExpansion: aiProcessingModeUsesExpansion(state.aiProcessingMode),
+        targetChars: aiProcessingModeUsesExpansion(state.aiProcessingMode) ? state.workflowTargetChars : 0,
         maxChars: state.workflowMaxChars,
       }),
     });
@@ -3017,15 +3051,30 @@ function attachEnhancedPageEditorEvents() {
 function syncCurrentPageGenerateUi() {
   if (!el.generateCurrentPageBtn || !el.cancelGenerateCurrentPageBtn) return;
   const page = getSelectedPage();
-  const pageActive = page ? isPageGenerating(page.id) : false;
+  const requestKey = page ? getPageGenerateRequestKey(page.id) : "";
+  const activeRequest = requestKey ? activeRequests.get(requestKey) : null;
+  const pageActive = Boolean(activeRequest);
   const themeReady = isStandardWorkflowThemeReady();
+  const sharedPrompt = getCurrentSharedPromptValue();
+  const canModify = Boolean(page?.baseImage && sharedPrompt && !pageActive);
   if (pageActive) {
     el.generateCurrentPageBtn.disabled = true;
-    el.generateCurrentPageBtn.textContent = "\u751f\u6210\u4e2d...";
+    if (el.modifyCurrentPageBtn) el.modifyCurrentPageBtn.disabled = true;
   } else {
     el.generateCurrentPageBtn.disabled = !page || !themeReady;
     el.generateCurrentPageBtn.textContent = page?.generated ? "\u91cd\u65b0\u751f\u6210\u8be5\u9875" : "\u751f\u6210\u8be5\u9875";
     delete el.generateCurrentPageBtn.dataset.idleText;
+    if (el.modifyCurrentPageBtn) {
+      el.modifyCurrentPageBtn.disabled = !canModify;
+      el.modifyCurrentPageBtn.textContent = "\u6309\u8981\u6c42\u4fee\u6539";
+      delete el.modifyCurrentPageBtn.dataset.idleText;
+    }
+  }
+  if (pageActive && activeRequest?.button === el.generateCurrentPageBtn) {
+    el.generateCurrentPageBtn.textContent = "\u751f\u6210\u4e2d...";
+  }
+  if (pageActive && el.modifyCurrentPageBtn && activeRequest?.button === el.modifyCurrentPageBtn) {
+    el.modifyCurrentPageBtn.textContent = "\u4fee\u6539\u4e2d...";
   }
   el.cancelGenerateCurrentPageBtn.hidden = !pageActive;
   el.cancelGenerateCurrentPageBtn.disabled = !pageActive;
@@ -3052,25 +3101,14 @@ function syncCurrentPageGenerateUi() {
 function upgradeSmartUiLayout() {
   const splitStage = document.querySelector('[data-step-panel="split"]');
   const splitControlGrid = splitStage?.querySelector(".split-control-grid");
-  if (splitControlGrid && !document.getElementById("workflowEnableExpansion")) {
-    const field = document.createElement("label");
-    field.className = "field split-toggle-field";
-    field.innerHTML = `
-      <span>\u5185\u5bb9\u6269\u5c55</span>
-      <div class="toggle-inline">
-        <input id="workflowEnableExpansion" type="checkbox" />
-        <span>\u9700\u8981\u6709\u4f9d\u636e\u6269\u5199</span>
-      </div>
-    `;
-    splitControlGrid.appendChild(field);
-    el.workflowEnableExpansion = field.querySelector("#workflowEnableExpansion");
-  }
+  document.getElementById("workflowEnableExpansion")?.closest(".field")?.remove();
+  el.workflowEnableExpansion = null;
   if (splitControlGrid && !document.getElementById("workflowTargetChars")) {
     const field = document.createElement("label");
     field.className = "field";
     field.innerHTML = `
       <span>\u6bcf\u9875\u76ee\u6807\u5b57\u6570</span>
-      <input id="workflowTargetChars" type="number" min="0" max="300" placeholder="\u52fe\u9009\u6269\u5199\u540e\u542f\u7528" />
+      <input id="workflowTargetChars" type="number" min="0" max="300" placeholder="\u9009\u62e9\u201c\u62c6\u5206\u5e76\u6269\u5199\u201d\u540e\u542f\u7528" />
     `;
     splitControlGrid.appendChild(field);
     el.workflowTargetChars = field.querySelector("#workflowTargetChars");
@@ -3206,8 +3244,8 @@ function renderPagesWorkbench() {
     if (el.pageOnscreenBodyEditor) el.pageOnscreenBodyEditor.value = "";
     if (el.pageOnscreenEditor) el.pageOnscreenEditor.value = "";
     if (el.gptPageStylePrompt) el.gptPageStylePrompt.value = "";
-    if (el.gptPageStyleField) el.gptPageStyleField.hidden = !usingGptSimpleWorkflow();
-    if (el.pageExtraPromptField) el.pageExtraPromptField.hidden = usingGptSimpleWorkflow();
+    if (el.gptPageStyleField) el.gptPageStyleField.hidden = true;
+    if (el.pageExtraPromptField) el.pageExtraPromptField.hidden = false;
     el.pageExtraPrompt.value = "";
     el.pagePromptTrace.textContent = "";
     if (el.viewCurrentPageLargeBtn) el.viewCurrentPageLargeBtn.disabled = true;
@@ -3230,10 +3268,10 @@ function renderPagesWorkbench() {
   if (el.pageOnscreenTitleEditor) el.pageOnscreenTitleEditor.value = draft.onscreenTitle;
   if (el.pageOnscreenBodyEditor) el.pageOnscreenBodyEditor.value = draft.onscreenBody;
   if (el.pageOnscreenPreview) el.pageOnscreenPreview.innerHTML = "";
-  if (el.gptPageStyleField) el.gptPageStyleField.hidden = !usingGptSimpleWorkflow();
-  if (el.pageExtraPromptField) el.pageExtraPromptField.hidden = usingGptSimpleWorkflow();
-  if (el.gptPageStylePrompt) el.gptPageStylePrompt.value = draft.pageStylePrompt || "";
-  el.pageExtraPrompt.value = draft.extraPrompt || "";
+  if (el.gptPageStyleField) el.gptPageStyleField.hidden = true;
+  if (el.pageExtraPromptField) el.pageExtraPromptField.hidden = false;
+  if (el.gptPageStylePrompt) el.gptPageStylePrompt.value = "";
+  el.pageExtraPrompt.value = draft.sharedPrompt || draft.extraPrompt || draft.pageStylePrompt || "";
   el.pagePromptTrace.textContent = stringifyTrace(page.promptTrace);
   if (el.viewCurrentPageLargeBtn) {
     el.viewCurrentPageLargeBtn.disabled = !page.baseImage || isPageGenerating(page.id);
@@ -3316,8 +3354,9 @@ async function copyCurrentPagePrompt() {
   if (!page) return;
   if (!ensureStandardWorkflowThemeReady("请先生成并确认风格，再复制标准链路提示词。")) return;
   const draft = ensurePageDraft(page);
-  draft.extraPrompt = el.pageExtraPrompt.value.trim();
-  draft.pageStylePrompt = el.gptPageStylePrompt?.value.trim() || "";
+  draft.sharedPrompt = getCurrentSharedPromptValue();
+  draft.extraPrompt = draft.sharedPrompt;
+  draft.pageStylePrompt = draft.sharedPrompt;
   draft.onscreenContent = updateCurrentPageDraftFromEditors();
   const promptTrace = page.promptTrace?.finalImage || null;
   const pageContent = String(page.onscreenContentText || page.onscreenContent || page.pageContent || "").trim();
@@ -3347,6 +3386,7 @@ async function copyCurrentPagePrompt() {
           imageModel: getCurrentWorkflowImageModel(),
           jobId: state.workflowJob?.id,
           pageId: page.id,
+          sharedPrompt: draft.sharedPrompt,
           extraPrompt: draft.extraPrompt,
           pageStylePrompt: draft.pageStylePrompt,
           canvasImage,
@@ -3404,11 +3444,12 @@ async function generateCurrentPage() {
   }
 
   const draft = ensurePageDraft(page);
-  draft.extraPrompt = el.pageExtraPrompt.value.trim();
-  draft.pageStylePrompt = el.gptPageStylePrompt?.value.trim() || "";
+  draft.sharedPrompt = getCurrentSharedPromptValue();
+  draft.extraPrompt = draft.sharedPrompt;
+  draft.pageStylePrompt = draft.sharedPrompt;
   draft.onscreenContent = updateCurrentPageDraftFromEditors();
   const requestKey = getPageGenerateRequestKey(page.id);
-  const signal = startCancelableAction(requestKey, null, null);
+  const signal = startCancelableAction(requestKey, el.generateCurrentPageBtn, el.cancelGenerateCurrentPageBtn, page?.generated ? "重新生成中..." : "生成中...");
   page.generationStatus = "preparing";
   page.generationError = "";
   renderPagesWorkbench();
@@ -3438,6 +3479,7 @@ async function generateCurrentPage() {
         slideAspect: state.settings.slideAspect,
         size: getWorkflowGenerationSize(),
         seed: state.settings.seed,
+        sharedPrompt: draft.sharedPrompt,
         extraPrompt: draft.extraPrompt,
         pageStylePrompt: draft.pageStylePrompt,
         onscreenContent: draft.onscreenContent,
@@ -3478,6 +3520,97 @@ async function generateCurrentPage() {
   }
 }
 
+async function modifyCurrentPage() {
+  const page = getSelectedPage();
+  if (!page) return;
+  const draft = ensurePageDraft(page);
+  draft.sharedPrompt = getCurrentSharedPromptValue();
+  draft.extraPrompt = draft.sharedPrompt;
+  draft.pageStylePrompt = draft.sharedPrompt;
+  draft.onscreenContent = updateCurrentPageDraftFromEditors();
+  if (!draft.sharedPrompt) {
+    setStatus("请先填写该页提示词，再按要求修改。", "error");
+    return;
+  }
+  if (!page.baseImage) {
+    setStatus("当前页还没有可修改的底图，请先生成该页。", "error");
+    return;
+  }
+
+  await ensureServerConfigReady();
+  const selectedImageModel = getCurrentWorkflowImageModel();
+  if (usingHostedWorkflowModel() && !hasHostedImageApiKey()) {
+    setStatus("请先填写生图 API Key。", "error");
+    switchTab("settings");
+    return;
+  }
+  if (!usingHostedWorkflowModel() && !hasDashScopeApiKey()) {
+    setStatus("请先填写 DashScope / Qwen API Key。", "error");
+    switchTab("settings");
+    return;
+  }
+
+  const requestKey = getPageGenerateRequestKey(page.id);
+  const signal = startCancelableAction(requestKey, el.modifyCurrentPageBtn, el.cancelGenerateCurrentPageBtn, "修改中...");
+  page.generationStatus = "preparing";
+  page.generationError = "";
+  renderPagesWorkbench();
+  setStatus(`第${page.pageNumber}页正在按提示词修改...`, "running");
+  try {
+    const canvasImage = await exportCurrentArtboard();
+    const data = await apiJson("/api/workflow/page/generate-v2", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal,
+      body: JSON.stringify({
+        apiKey: state.settings.apiKey,
+        googleApiKey: state.settings.googleApiKey,
+        grsaiApiKey: state.settings.grsaiApiKey,
+        openAiImageApiKey: state.settings.openAiImageApiKey,
+        openAiImageBaseUrl: state.settings.openAiImageBaseUrl,
+        grsaiHost: state.settings.grsaiHost,
+        region: state.settings.region,
+        imageModel: selectedImageModel,
+        jobId: state.workflowJobId,
+        pageId: page.id,
+        slideAspect: state.settings.slideAspect,
+        size: getWorkflowGenerationSize(),
+        seed: state.settings.seed,
+        promptMode: "modify-only",
+        sharedPrompt: draft.sharedPrompt,
+        extraPrompt: draft.extraPrompt,
+        pageStylePrompt: draft.pageStylePrompt,
+        onscreenContent: draft.onscreenContent,
+        canvasImage,
+      }),
+    });
+    if (!data.page?.generated) {
+      throw new Error(data.page?.generationError || "这一页没有拿到图片结果。");
+    }
+    state.workflowJob.pages = state.workflowJob.pages.map((item) => item.id === data.page.id ? data.page : item);
+    state.workflowJob = sanitizeRecoveredWorkflowJob(state.workflowJob);
+    setStatus(`第${page.pageNumber}页已按要求修改。`, "success");
+    saveState();
+  } catch (error) {
+    if (isAbortError(error)) return;
+    if (isMissingWorkflowJobError(error)) {
+      clearWorkflowSession({ toSplit: true });
+      setStatus("之前的拆分任务已失效，请重新拆分。", "error");
+      return;
+    }
+    const current = state.workflowJob?.pages?.find((item) => item.id === page.id);
+    if (current) {
+      current.generationStatus = "error";
+      current.generationError = error.message || "修改失败。";
+    }
+    setStatus(error.message || "修改失败。", "error");
+  } finally {
+    finishCancelableAction(requestKey);
+    renderPagesWorkbench();
+    syncCurrentPageGenerateUi();
+  }
+}
+
 function initialize() {
   cacheElements();
   loadState();
@@ -3508,7 +3641,7 @@ function initialize() {
   });
   el.workflowMaxChars?.addEventListener("change", () => {
     state.workflowMaxChars = clamp(Number(el.workflowMaxChars.value || 200), 0, 400);
-    if (state.workflowTargetChars && state.workflowMaxChars && state.workflowTargetChars > state.workflowMaxChars) {
+    if (aiProcessingModeUsesExpansion(state.aiProcessingMode) && state.workflowTargetChars && state.workflowMaxChars && state.workflowTargetChars > state.workflowMaxChars) {
       state.workflowTargetChars = state.workflowMaxChars;
       if (el.workflowTargetChars) el.workflowTargetChars.value = String(state.workflowTargetChars);
     }

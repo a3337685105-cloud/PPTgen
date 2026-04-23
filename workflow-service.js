@@ -18,9 +18,9 @@ const OPENAI_WORKFLOW_IMAGE_MODELS = new Set([
 ]);
 const DEFAULT_REGION = "beijing";
 const DEFAULT_DECORATION_LEVEL = "medium";
-const GPT_IMAGE_FIXED_PROMPT = [
+const WORKFLOW_FIXED_PROMPT = [
   "你是一位国际一流的学术PPT设计大师，杂志编辑风/平面设计大师，红点设计奖，精通从内容提炼、逻辑梳理、排版设计到配图的全流程PPT设计。",
-  "根据以上内容设计一页PPT。要求内部逻辑清晰、重点突出。字体采用相应字体，按照需要加粗或艺术化，一页不超两种字体。标题与正文字体大小越1:0.618，黄金比例。对比度足够，确保易读性。视觉效果通透美观。搭配的图片中，照片真实，测试结果图片准确无误，说明图简洁凝练清晰。",
+  "根据以上内容设计一页PPT。要求内部逻辑清晰、重点突出。字体采用相应字体，按照需要加粗或艺术化，一页不超两种字体。标题与正文字体大小越1:0.618，黄金比例。对比度足够，确保易读性。视觉效果通透美观。你擅长为内容配图，搭配的图片中，照片真实，测试结果图片准确无误，说明图简洁凝练清晰。",
 ].join("\n");
 const CONSTANTS_RULES = [
   "整份演示遵循对比、重复、对齐、亲密四项排版原则。",
@@ -960,7 +960,6 @@ function buildThemeDefinitionBlock(themeDefinition) {
   if (!themeDefinition) return "";
   return [
       "【全局主题模板】",
-      themeDefinition.modelPrompt ? `模型总纲：${themeDefinition.modelPrompt}` : "",
       themeDefinition.basic ? `基础风格：${themeDefinition.basic}` : "",
       themeDefinition.cover ? `封面模块：${themeDefinition.cover}` : "",
       themeDefinition.catalog ? `目录模块：${themeDefinition.catalog}` : "",
@@ -1051,7 +1050,6 @@ function buildThemeDefinitionBlock(themeDefinition) {
 function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, preferences) {
   const normalized = {
     displaySummaryZh: sanitizeDirectionalThemeText(result?.displaySummaryZh || ""),
-    modelPrompt: sanitizeDirectionalThemeText(result?.modelPrompt || ""),
     basic: sanitizeDirectionalThemeText(result?.basic || ""),
     cover: sanitizeDirectionalThemeText(result?.cover || ""),
     catalog: sanitizeDirectionalThemeText(result?.catalog || ""),
@@ -1071,9 +1069,6 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
         normalized.content ? `内容页：${normalized.content}` : "",
       ].filter(Boolean).join("\n");
     }
-    if (!normalized.modelPrompt) {
-      normalized.modelPrompt = [normalized.basic, normalized.cover, normalized.catalog, normalized.chapter, normalized.content, normalized.data].filter(Boolean).join("\n");
-    }
     return normalized;
   }
 
@@ -1084,7 +1079,6 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
     normalized.chapter = "";
     normalized.content = "";
     normalized.data = "";
-    normalized.modelPrompt = normalized.basic || normalized.modelPrompt;
     if (!normalized.displaySummaryZh) {
       normalized.displaySummaryZh = normalized.basic || (fallbackThemeName ? `主题：${fallbackThemeName}` : "已生成全局 Basic 风格。");
     }
@@ -1360,7 +1354,7 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
       "你是一个演示文稿视觉总监，只负责生成全局基础风格基底。",
       "基础风格只定义整份演示的世界观、成熟风格基底、色彩气质、材质、字体层级、光影和统一视觉秩序。",
       "本阶段仅生成基础风格字段；页面级模块会在单页生成前根据页面内容即时生成。",
-      "返回 JSON 对象，字段包含 displaySummaryZh、modelPrompt、basic。",
+      "返回 JSON 对象，字段包含 displaySummaryZh、basic。",
     ].join("\n");
     const userPrompt = [
       `【主题关键词】\n${safeThemeName}`,
@@ -1378,7 +1372,7 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
       "5. 只给出方向性要求，不写具体实现配方；不要列出具体字体名称、字重组合、字号比例、网格列数、像素尺寸、圆角数值或代码式参数。",
       "6. 如果需要描述文字风格，只说明标题更强、正文更稳、技术信息更克制这类方向，不展开到具体字体家族或精确配比。",
       "返回 JSON：",
-      "{\"displaySummaryZh\":\"...\",\"modelPrompt\":\"...\",\"basic\":\"...\"}",
+      "{\"displaySummaryZh\":\"...\",\"basic\":\"...\"}",
     ].filter(Boolean).join("\n\n");
 
     const styleModel = getWorkflowStyleModel();
@@ -1919,7 +1913,7 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
     const body = stripTitleFromOnscreenContent(title, cleanOnscreenContent) || cleanOnscreenContent || title;
     const style = stringifyStructuredField(pageStylePrompt || "").trim();
     return [
-      GPT_IMAGE_FIXED_PROMPT,
+      WORKFLOW_FIXED_PROMPT,
       style ? `可选风格提示词：\n${style}` : "",
       `内容：\n标题：${title}\n正文：${body}`,
     ].filter(Boolean).join("\n\n");
@@ -1943,13 +1937,11 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
       || "";
     const pptLayoutPrinciples = buildPptLayoutPrinciplesBlock();
     const layoutInstruction = layout.instruction;
-    const roleInstruction = "你是一位资深 PPT 视觉设计师，接下来要绘制的是一张可直接用于演示文稿的单页 PPT。请把正文内容转化为清晰、美观、可读的幻灯片画面。";
+    const roleInstruction = WORKFLOW_FIXED_PROMPT;
     const basicPrompt = getConfirmedThemeBasicOrThrow(job);
-    const preferenceBlock = buildPreferencePromptBlock(job.preferences || DEFAULT_PREFERENCES);
     return [
       roleInstruction,
       basicPrompt ? `基础风格：${basicPrompt}` : "",
-      preferenceBlock,
       pptLayoutPrinciples,
       pageTypeTemplate,
       layoutInstruction,
@@ -2306,7 +2298,6 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
         };
       } else {
         const basicPrompt = getConfirmedThemeBasicOrThrow(job);
-        const preferenceBlock = buildPreferencePromptBlock(job.preferences || DEFAULT_PREFERENCES);
         page.jitDecoration = await runJitDecorationExtraction(effectiveApiKey, region || DEFAULT_REGION, job, page);
         page.promptTrace.jitDecoration = page.jitDecoration.trace || {
           source: page.jitDecoration.source,
@@ -2321,7 +2312,7 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
           promptMode: "standard",
           pageStylePrompt: "",
           basicIncluded: Boolean(basicPrompt),
-          questionnaireAnchorIncluded: Boolean(preferenceBlock),
+          questionnaireAnchorIncluded: false,
           layoutMapping: page.layoutMapping || null,
           pageTypeModule: page.pageTypePromptModule || null,
           jitDecoration: {
@@ -2584,7 +2575,6 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
         };
       } else {
         const basicPrompt = getConfirmedThemeBasicOrThrow(job);
-        const preferenceBlock = buildPreferencePromptBlock(job.preferences || DEFAULT_PREFERENCES);
         page.jitDecoration = await runJitDecorationExtraction(effectiveApiKey, region || DEFAULT_REGION, job, page);
         page.promptTrace.jitDecoration = page.jitDecoration.trace || {
           source: page.jitDecoration.source,
@@ -2599,7 +2589,7 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
           promptMode: "standard",
           pageStylePrompt: "",
           basicIncluded: Boolean(basicPrompt),
-          questionnaireAnchorIncluded: Boolean(preferenceBlock),
+          questionnaireAnchorIncluded: false,
           layoutMapping: page.layoutMapping || null,
           pageTypeModule: page.pageTypePromptModule || null,
           jitDecoration: {
