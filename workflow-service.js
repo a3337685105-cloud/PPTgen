@@ -908,16 +908,57 @@ function getAiProcessingModeLabel(value) {
     ];
   }
 
-  function buildPreferencePromptBlock(preferences) {
-    return [
-      "【问卷风格锚点】",
-      ...buildPreferencePromptPairs(preferences),
-    ].join("\n");
-  }
+function buildPreferencePromptBlock(preferences) {
+  return [
+    "【问卷风格锚点】",
+    ...buildPreferencePromptPairs(preferences),
+  ].join("\n");
+}
 
-  function buildThemeDefinitionBlock(themeDefinition) {
-    if (!themeDefinition) return "";
-    return [
+const THEME_IMPLEMENTATION_KEYWORD_PATTERN = /(优设标题黑|MiSans|思源黑体|JetBrains Mono|Helvetica(?:\s+Now)?|Inter(?:\s+Display)?|DIN|Heavy|Bold|Regular|Light|0\.618|黄金比例|pt\b|px\b|12列|12-column|12 column|R=\d+\s*px)/i;
+const THEME_IMPLEMENTATION_FRAGMENT_PATTERNS = [
+  /字重对比[^；。！!\n|]*/gi,
+  /无衬线[^；。！!\n|]*?(?:优设标题黑|MiSans|思源黑体|JetBrains Mono|Helvetica(?:\s+Now)?|Inter(?:\s+Display)?|DIN)[^；。！!\n|]*/gi,
+  /标题与正文(?:字体大小|字号)[^；。！!\n|]*?(?:0\.618|黄金比例)[^；。！!\n|]*/gi,
+  /(?:中文|英文|技术参数)[:：]?\s*[^；。！!\n|]*?(?:优设标题黑|MiSans|思源黑体|JetBrains Mono|Helvetica(?:\s+Now)?|Inter(?:\s+Display)?|DIN)[^；。！!\n|]*/gi,
+];
+
+function sanitizeDirectionalThemeText(text) {
+  let value = stringifyStructuredField(text || "");
+  if (!value) return "";
+  let removedTypographyImplementation = false;
+  value = value.replace(/\s*\|\s*/g, "；");
+  THEME_IMPLEMENTATION_FRAGMENT_PATTERNS.forEach((pattern) => {
+    if (pattern.test(value)) {
+      removedTypographyImplementation = true;
+    }
+    pattern.lastIndex = 0;
+    value = value.replace(pattern, "");
+  });
+  const fragments = (value.match(/[^。！？；\n]+[。！？；]?/gu) || [])
+    .map((item) => item.replace(/[。！？；]+$/u, "").trim())
+    .filter(Boolean);
+  const cleaned = [];
+  fragments.forEach((fragment) => {
+    if (THEME_IMPLEMENTATION_KEYWORD_PATTERN.test(fragment)) {
+      removedTypographyImplementation = true;
+      return;
+    }
+    cleaned.push(fragment);
+  });
+  if (removedTypographyImplementation) {
+    cleaned.push("字体与版式只保留方向性要求：标题更有识别度，正文稳定清晰，技术信息克制统一");
+  }
+  return Array.from(new Set(cleaned))
+    .join("；")
+    .replace(/；{2,}/g, "；")
+    .replace(/^；|；$/g, "")
+    .trim();
+}
+
+function buildThemeDefinitionBlock(themeDefinition) {
+  if (!themeDefinition) return "";
+  return [
       "【全局主题模板】",
       themeDefinition.modelPrompt ? `模型总纲：${themeDefinition.modelPrompt}` : "",
       themeDefinition.basic ? `基础风格：${themeDefinition.basic}` : "",
@@ -1007,20 +1048,20 @@ function getAiProcessingModeLabel(value) {
     return lines.join("\n");
   }
 
-  function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, preferences) {
-    const normalized = {
-      displaySummaryZh: stringifyStructuredField(result?.displaySummaryZh || ""),
-      modelPrompt: stringifyStructuredField(result?.modelPrompt || ""),
-      basic: stringifyStructuredField(result?.basic || ""),
-      cover: stringifyStructuredField(result?.cover || ""),
-      catalog: stringifyStructuredField(result?.catalog || ""),
-      chapter: stringifyStructuredField(result?.chapter || ""),
-      content: stringifyStructuredField(result?.content || ""),
-      data: stringifyStructuredField(result?.data || ""),
-      decorationLevel: normalizeDecorationLevel(decorationLevel),
-      preferences,
-      themeName: String(fallbackThemeName || "").trim(),
-    };
+function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, preferences) {
+  const normalized = {
+    displaySummaryZh: sanitizeDirectionalThemeText(result?.displaySummaryZh || ""),
+    modelPrompt: sanitizeDirectionalThemeText(result?.modelPrompt || ""),
+    basic: sanitizeDirectionalThemeText(result?.basic || ""),
+    cover: sanitizeDirectionalThemeText(result?.cover || ""),
+    catalog: sanitizeDirectionalThemeText(result?.catalog || ""),
+    chapter: sanitizeDirectionalThemeText(result?.chapter || ""),
+    content: sanitizeDirectionalThemeText(result?.content || ""),
+    data: sanitizeDirectionalThemeText(result?.data || ""),
+    decorationLevel: normalizeDecorationLevel(decorationLevel),
+    preferences,
+    themeName: String(fallbackThemeName || "").trim(),
+  };
     if (!normalized.displaySummaryZh) {
       normalized.displaySummaryZh = [
         fallbackThemeName ? `主题：${fallbackThemeName}` : "",
@@ -1334,6 +1375,8 @@ function getAiProcessingModeLabel(value) {
       "2. 写成可直接拼进生图提示词的风格指令，不写成解释文档。",
       "3. 只描述全局统一气质，不指定某一页的构图，不写目录页/内容页/数据页的具体排版。",
       "4. 以正向语言说明文字清晰、结构克制、装饰有序、背景服务阅读。",
+      "5. 只给出方向性要求，不写具体实现配方；不要列出具体字体名称、字重组合、字号比例、网格列数、像素尺寸、圆角数值或代码式参数。",
+      "6. 如果需要描述文字风格，只说明标题更强、正文更稳、技术信息更克制这类方向，不展开到具体字体家族或精确配比。",
       "返回 JSON：",
       "{\"displaySummaryZh\":\"...\",\"modelPrompt\":\"...\",\"basic\":\"...\"}",
     ].filter(Boolean).join("\n\n");

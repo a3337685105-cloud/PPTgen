@@ -568,7 +568,7 @@ function loadState() {
   state.themeName = String(parsed.themeName || "");
   state.decorationLevel = String(parsed.decorationLevel || "medium");
   state.preferences = { ...DEFAULT_PREFERENCES, ...(parsed.preferences || {}) };
-  state.themeDefinition = parsed.themeDefinition || null;
+  state.themeDefinition = sanitizeRecoveredThemeDefinition(parsed.themeDefinition || null);
   state.themePromptTrace = parsed.themePromptTrace || null;
   state.selectedThemePromptSection = String(parsed.selectedThemePromptSection || "basic");
   state.themeConfirmed = Boolean(parsed.themeConfirmed);
@@ -910,8 +910,59 @@ function syncWorkflowModeUi() {
   }
 }
 
+const THEME_IMPLEMENTATION_KEYWORD_PATTERN = /(优设标题黑|MiSans|思源黑体|JetBrains Mono|Helvetica(?:\s+Now)?|Inter(?:\s+Display)?|DIN|Heavy|Bold|Regular|Light|0\.618|黄金比例|pt\b|px\b|12列|12-column|12 column|R=\d+\s*px)/i;
+const THEME_IMPLEMENTATION_FRAGMENT_PATTERNS = [
+  /字重对比[^；。！!\n|]*/gi,
+  /无衬线[^；。！!\n|]*?(?:优设标题黑|MiSans|思源黑体|JetBrains Mono|Helvetica(?:\s+Now)?|Inter(?:\s+Display)?|DIN)[^；。！!\n|]*/gi,
+  /标题与正文(?:字体大小|字号)[^；。！!\n|]*?(?:0\.618|黄金比例)[^；。！!\n|]*/gi,
+  /(?:中文|英文|技术参数)[:：]?\s*[^；。！!\n|]*?(?:优设标题黑|MiSans|思源黑体|JetBrains Mono|Helvetica(?:\s+Now)?|Inter(?:\s+Display)?|DIN)[^；。！!\n|]*/gi,
+];
+
+function sanitizeDirectionalThemeText(text) {
+  const source = String(text || "").trim();
+  if (!source) return "";
+  let value = source.replace(/\s*\|\s*/g, "；");
+  let removedTypographyImplementation = false;
+  THEME_IMPLEMENTATION_FRAGMENT_PATTERNS.forEach((pattern) => {
+    if (pattern.test(value)) {
+      removedTypographyImplementation = true;
+    }
+    pattern.lastIndex = 0;
+    value = value.replace(pattern, "");
+  });
+  const fragments = (value.match(/[^。！？；\n]+[。！？；]?/gu) || [])
+    .map((item) => item.replace(/[。！？；]+$/u, "").trim())
+    .filter(Boolean);
+  const cleaned = [];
+  fragments.forEach((fragment) => {
+    if (THEME_IMPLEMENTATION_KEYWORD_PATTERN.test(fragment)) {
+      removedTypographyImplementation = true;
+      return;
+    }
+    cleaned.push(fragment);
+  });
+  if (removedTypographyImplementation) {
+    cleaned.push("字体与版式只保留方向性要求：标题更有识别度，正文稳定清晰，技术信息克制统一");
+  }
+  return Array.from(new Set(cleaned))
+    .join("；")
+    .replace(/；{2,}/g, "；")
+    .replace(/^；|；$/g, "")
+    .trim();
+}
+
+function sanitizeRecoveredThemeDefinition(themeDefinition) {
+  if (!themeDefinition || typeof themeDefinition !== "object") return themeDefinition;
+  const normalized = { ...themeDefinition };
+  ["displaySummaryZh", "modelPrompt", "basic", "cover", "catalog", "chapter", "content", "data"].forEach((key) => {
+    normalized[key] = sanitizeDirectionalThemeText(normalized[key] || "");
+  });
+  return normalized;
+}
+
 function sanitizeRecoveredWorkflowJob(job) {
   if (!job || !Array.isArray(job.pages)) return job;
+  job.themeDefinition = sanitizeRecoveredThemeDefinition(job.themeDefinition || null);
   job.pages = job.pages.map((page) => {
     const normalizedPage = { ...page };
     if (normalizedPage.generationStatus === "running") {
@@ -1204,7 +1255,7 @@ function restoreHistoryProject() {
   state.selectedPageId = snapshot.selectedPageId || state.workflowJob?.pages?.[0]?.id || "";
   state.pageDrafts = snapshot.pageDrafts && typeof snapshot.pageDrafts === "object" ? snapshot.pageDrafts : {};
   state.smartStep = state.workflowJob ? "pages" : "split";
-  state.themeDefinition = state.workflowJob?.themeDefinition || state.themeDefinition;
+  state.themeDefinition = sanitizeRecoveredThemeDefinition(state.workflowJob?.themeDefinition || state.themeDefinition);
   state.themePromptTrace = state.workflowJob?.promptTrace?.themeCore || state.themePromptTrace;
   state.themeConfirmed = Boolean(state.themeDefinition);
   applyStateToUi();
@@ -2174,7 +2225,7 @@ async function generateTheme() {
         pagePlanSummary: buildThemePagePlanSummary(),
       }),
     });
-    state.themeDefinition = data.themeDefinition;
+    state.themeDefinition = sanitizeRecoveredThemeDefinition(data.themeDefinition);
     state.themePromptTrace = data.promptTrace || null;
     state.themeConfirmed = false;
     updateThemeView();
