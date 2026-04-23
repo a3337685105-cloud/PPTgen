@@ -105,7 +105,7 @@ const state = {
     apiKey: "",
     googleApiKey: "",
     openAiImageApiKey: "",
-    openAiImageBaseUrl: "https://api.openai.com",
+    openAiImageBaseUrl: "https://api.openai.com/v1/images/generations",
     workflowImageModel: PPT_MODEL,
     enableGeminiGoogleSearch: false,
     grsaiHost: "domestic",
@@ -586,7 +586,7 @@ function applyStateToUi() {
   el.apiKey.value = state.settings.apiKey || "";
   el.googleApiKey.value = state.settings.googleApiKey || "";
   if (el.openAiImageApiKey) el.openAiImageApiKey.value = state.settings.openAiImageApiKey || "";
-  if (el.openAiImageBaseUrl) el.openAiImageBaseUrl.value = state.settings.openAiImageBaseUrl || "https://api.openai.com";
+  if (el.openAiImageBaseUrl) el.openAiImageBaseUrl.value = state.settings.openAiImageBaseUrl || "https://api.openai.com/v1/images/generations";
   if (el.quickApiKey) el.quickApiKey.value = state.settings.apiKey || "";
   if (el.quickGoogleApiKey) el.quickGoogleApiKey.value = state.settings.googleApiKey || "";
   if (el.quickGrsaiHost) el.quickGrsaiHost.value = state.settings.grsaiHost || "domestic";
@@ -755,7 +755,7 @@ function getCurrentHostedImageKeyPayload() {
   return {
     googleApiKey: state.settings.googleApiKey,
     openAiImageApiKey: state.settings.openAiImageApiKey,
-    openAiImageBaseUrl: state.settings.openAiImageBaseUrl || "https://api.openai.com",
+    openAiImageBaseUrl: state.settings.openAiImageBaseUrl || "https://api.openai.com/v1/images/generations",
   };
 }
 
@@ -2641,7 +2641,7 @@ async function testApiKeys() {
   state.settings.apiKey = el.apiKey.value.trim();
   state.settings.googleApiKey = el.googleApiKey.value.trim();
   state.settings.openAiImageApiKey = el.openAiImageApiKey?.value.trim() || "";
-  state.settings.openAiImageBaseUrl = el.openAiImageBaseUrl?.value.trim() || "https://api.openai.com";
+  state.settings.openAiImageBaseUrl = el.openAiImageBaseUrl?.value.trim() || "https://api.openai.com/v1/images/generations";
   state.settings.workflowImageModel = el.workflowImageModel.value || PPT_MODEL;
   state.settings.grsaiHost = el.grsaiHost?.value || "domestic";
   state.settings.region = el.region.value;

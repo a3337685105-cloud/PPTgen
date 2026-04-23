@@ -37,6 +37,7 @@ const GRSAI_HOSTS = {
   domestic: "https://grsai.dakka.com.cn",
   overseas: "https://grsaiapi.com",
 };
+const OPENAI_IMAGE_GENERATIONS_PATH = "/v1/images/generations";
 const GEMINI_IMAGE_MODELS = new Set([
   "gemini-3.1-flash-image-preview",
   "gemini-3-pro-image-preview",
@@ -129,8 +130,18 @@ function resolveGrsaiHost(host) {
   return (GRSAI_HOSTS[value] || GRSAI_HOSTS.domestic).replace(/\/+$/, "");
 }
 
-function resolveOpenAiImageBaseUrl(baseUrl) {
-  return String(baseUrl || process.env.OPENAI_IMAGE_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com").trim().replace(/\/+$/, "");
+function resolveOpenAiImageEndpoint(endpointOrHost) {
+  const value = String(
+    endpointOrHost
+    || process.env.OPENAI_IMAGE_GENERATIONS_URL
+    || process.env.OPENAI_IMAGE_BASE_URL
+    || process.env.OPENAI_BASE_URL
+    || "https://api.openai.com",
+  ).trim().replace(/\/+$/, "");
+  if (new RegExp(`${OPENAI_IMAGE_GENERATIONS_PATH.replace(/\//g, "\\/")}$`, "i").test(value)) {
+    return value;
+  }
+  return `${value}${OPENAI_IMAGE_GENERATIONS_PATH}`;
 }
 
 function extensionToMimeType(extension) {
@@ -439,7 +450,7 @@ function buildGrsaiResultUrl(host) {
 }
 
 function buildOpenAiImageGenerationsUrl(baseUrl) {
-  return `${resolveOpenAiImageBaseUrl(baseUrl)}/v1/images/generations`;
+  return resolveOpenAiImageEndpoint(baseUrl);
 }
 
 async function requestJsonViaFetch({ url, method = "POST", headers = {}, body }) {
@@ -1407,7 +1418,7 @@ app.post("/api/test-image-key", async (req, res) => {
       return res.json({
         ok: true,
         provider: "openai-image",
-        message: `OpenAI 图片接口 Key 已填写，模型 ${model} 将使用 ${resolveOpenAiImageBaseUrl(openAiImageBaseUrl)}。`,
+        message: `OpenAI 图片接口 Key 已填写，模型 ${model} 将使用 ${resolveOpenAiImageEndpoint(openAiImageBaseUrl)}。`,
       });
     }
 
