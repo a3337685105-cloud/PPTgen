@@ -12,6 +12,7 @@ const { installWorkflowRoutes } = require("./workflow-service");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+let ACTIVE_PORT = Number(PORT);
 const ROOT_DIR = __dirname;
 const PUBLIC_DIR = path.join(ROOT_DIR, "public");
 const GENERATED_DIR = path.join(ROOT_DIR, "generated-images");
@@ -1314,7 +1315,7 @@ app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
     service: "nanobanana-ppt-studio",
-    port: PORT,
+    port: ACTIVE_PORT,
     generatedDir: GENERATED_DIR,
     libraryDocPath: LIBRARY_DOC_PATH,
     supportedRegions: Object.keys(REGION_MAP),
@@ -2169,6 +2170,7 @@ app.post("/api/export-workflow-ppt", async (req, res) => {
 });
 function startServer(port) {
   const server = app.listen(port, () => {
+    ACTIVE_PORT = Number(port);
     console.log(`Nano Banana PPT Studio is running at http://localhost:${port}`);
     console.log(`Generated images will be saved to ${GENERATED_DIR}`);
   });
