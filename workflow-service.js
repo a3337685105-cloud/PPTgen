@@ -2175,6 +2175,7 @@ function getAiProcessingModeLabel(value) {
     const {
       apiKey,
       googleApiKey,
+      grsaiApiKey,
       openAiImageApiKey,
       openAiImageBaseUrl,
       region,
@@ -2199,7 +2200,7 @@ function getAiProcessingModeLabel(value) {
     const effectiveGoogleApiKey = useOpenAiImage
       ? resolveOpenAiImageApiKey(openAiImageApiKey || googleApiKey)
       : useGrsai
-        ? resolveGrsaiApiKey(googleApiKey)
+        ? resolveGrsaiApiKey(grsaiApiKey || googleApiKey)
         : resolveGeminiApiKey(googleApiKey);
 
     if ((useGemini || useGrsai || useOpenAiImage) && !effectiveGoogleApiKey) {

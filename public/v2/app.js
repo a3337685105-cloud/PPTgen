@@ -104,6 +104,7 @@ const state = {
   settings: {
     apiKey: "",
     googleApiKey: "",
+    grsaiApiKey: "",
     openAiImageApiKey: "",
     openAiImageBaseUrl: "https://api.openai.com/v1/images/generations",
     workflowImageModel: PPT_MODEL,
@@ -204,6 +205,7 @@ function cacheElements() {
     "themeModelPrompt",
     "quickApiKey",
     "quickGoogleApiKey",
+    "quickGrsaiApiKey",
     "quickGrsaiHost",
     "quickTestApiKeyBtn",
       "workflowPageCount",
@@ -279,6 +281,7 @@ function cacheElements() {
     "reviseResultStrip",
     "apiKey",
     "googleApiKey",
+    "grsaiApiKey",
     "openAiImageApiKey",
     "openAiImageBaseUrl",
     "workflowImageModel",
@@ -585,10 +588,12 @@ function applyStateToUi() {
   syncSplitExpansionControls();
   el.apiKey.value = state.settings.apiKey || "";
   el.googleApiKey.value = state.settings.googleApiKey || "";
+  if (el.grsaiApiKey) el.grsaiApiKey.value = state.settings.grsaiApiKey || "";
   if (el.openAiImageApiKey) el.openAiImageApiKey.value = state.settings.openAiImageApiKey || "";
   if (el.openAiImageBaseUrl) el.openAiImageBaseUrl.value = state.settings.openAiImageBaseUrl || "https://api.openai.com/v1/images/generations";
   if (el.quickApiKey) el.quickApiKey.value = state.settings.apiKey || "";
   if (el.quickGoogleApiKey) el.quickGoogleApiKey.value = state.settings.googleApiKey || "";
+  if (el.quickGrsaiApiKey) el.quickGrsaiApiKey.value = state.settings.grsaiApiKey || "";
   if (el.quickGrsaiHost) el.quickGrsaiHost.value = state.settings.grsaiHost || "domestic";
   el.workflowImageModel.value = state.settings.workflowImageModel || PPT_MODEL;
   if (el.enableGeminiGoogleSearch) {
@@ -731,6 +736,10 @@ function usingOpenAiWorkflowModel() {
   return OPENAI_WORKFLOW_MODELS.has(getCurrentWorkflowImageModel());
 }
 
+function usingGrsaiWorkflowModel() {
+  return GRSAI_WORKFLOW_MODELS.has(getCurrentWorkflowImageModel());
+}
+
 function usingHostedWorkflowModel() {
   const model = getCurrentWorkflowImageModel();
   return GEMINI_WORKFLOW_MODELS.has(model) || GRSAI_WORKFLOW_MODELS.has(model) || OPENAI_WORKFLOW_MODELS.has(model);
@@ -748,12 +757,16 @@ function hasHostedImageApiKey() {
       || state.serverConfig?.configuredKeys?.hostedImage,
     );
   }
+  if (usingGrsaiWorkflowModel()) {
+    return Boolean(state.settings.grsaiApiKey || state.serverConfig?.configuredKeys?.hostedImage);
+  }
   return Boolean(state.settings.googleApiKey || state.serverConfig?.configuredKeys?.hostedImage);
 }
 
 function getCurrentHostedImageKeyPayload() {
   return {
     googleApiKey: state.settings.googleApiKey,
+    grsaiApiKey: state.settings.grsaiApiKey,
     openAiImageApiKey: state.settings.openAiImageApiKey,
     openAiImageBaseUrl: state.settings.openAiImageBaseUrl || "https://api.openai.com/v1/images/generations",
   };
@@ -2097,6 +2110,7 @@ async function sendRevise() {
         workflowRouteVersion: 2,
         apiKey: state.settings.apiKey,
         googleApiKey: state.settings.googleApiKey,
+        grsaiApiKey: state.settings.grsaiApiKey,
         openAiImageApiKey: state.settings.openAiImageApiKey,
         openAiImageBaseUrl: state.settings.openAiImageBaseUrl,
         region: state.settings.region,
@@ -2253,6 +2267,11 @@ function bindEvents() {
     if (el.quickGoogleApiKey) el.quickGoogleApiKey.value = state.settings.googleApiKey;
     saveState();
   });
+  el.grsaiApiKey?.addEventListener("input", () => {
+    state.settings.grsaiApiKey = el.grsaiApiKey.value.trim();
+    if (el.quickGrsaiApiKey) el.quickGrsaiApiKey.value = state.settings.grsaiApiKey;
+    saveState();
+  });
   el.openAiImageApiKey?.addEventListener("input", () => {
     state.settings.openAiImageApiKey = el.openAiImageApiKey.value.trim();
     saveState();
@@ -2269,6 +2288,11 @@ function bindEvents() {
   el.quickGoogleApiKey?.addEventListener("input", () => {
     state.settings.googleApiKey = el.quickGoogleApiKey.value.trim();
     if (el.googleApiKey) el.googleApiKey.value = state.settings.googleApiKey;
+    saveState();
+  });
+  el.quickGrsaiApiKey?.addEventListener("input", () => {
+    state.settings.grsaiApiKey = el.quickGrsaiApiKey.value.trim();
+    if (el.grsaiApiKey) el.grsaiApiKey.value = state.settings.grsaiApiKey;
     saveState();
   });
   el.workflowImageModel.addEventListener("change", () => {
@@ -2597,6 +2621,7 @@ async function batchGenerateReadyPages() {
         body: JSON.stringify({
           apiKey: state.settings.apiKey,
           googleApiKey: state.settings.googleApiKey,
+          grsaiApiKey: state.settings.grsaiApiKey,
           openAiImageApiKey: state.settings.openAiImageApiKey,
           openAiImageBaseUrl: state.settings.openAiImageBaseUrl,
           grsaiHost: state.settings.grsaiHost,
@@ -2640,6 +2665,7 @@ async function batchGenerateReadyPages() {
 async function testApiKeys() {
   state.settings.apiKey = el.apiKey.value.trim();
   state.settings.googleApiKey = el.googleApiKey.value.trim();
+  state.settings.grsaiApiKey = el.grsaiApiKey?.value.trim() || "";
   state.settings.openAiImageApiKey = el.openAiImageApiKey?.value.trim() || "";
   state.settings.openAiImageBaseUrl = el.openAiImageBaseUrl?.value.trim() || "https://api.openai.com/v1/images/generations";
   state.settings.workflowImageModel = el.workflowImageModel.value || PPT_MODEL;
@@ -2666,6 +2692,7 @@ async function testApiKeys() {
         body: JSON.stringify({
           apiKey: state.settings.apiKey,
           googleApiKey: state.settings.googleApiKey,
+          grsaiApiKey: state.settings.grsaiApiKey,
           openAiImageApiKey: state.settings.openAiImageApiKey,
           openAiImageBaseUrl: state.settings.openAiImageBaseUrl,
           grsaiHost: state.settings.grsaiHost,
@@ -2682,6 +2709,7 @@ async function testApiKeys() {
         body: JSON.stringify({
           apiKey: state.settings.apiKey,
           googleApiKey: state.settings.googleApiKey,
+          grsaiApiKey: state.settings.grsaiApiKey,
           region: state.settings.region,
           model: EDIT_MODEL,
         }),
@@ -3094,6 +3122,7 @@ async function copyCurrentPagePrompt() {
         body: JSON.stringify({
           apiKey: state.settings.apiKey,
           googleApiKey: state.settings.googleApiKey,
+          grsaiApiKey: state.settings.grsaiApiKey,
           openAiImageApiKey: state.settings.openAiImageApiKey,
           openAiImageBaseUrl: state.settings.openAiImageBaseUrl,
           region: state.settings.region,
@@ -3172,6 +3201,7 @@ async function generateCurrentPage() {
       body: JSON.stringify({
         apiKey: state.settings.apiKey,
         googleApiKey: state.settings.googleApiKey,
+        grsaiApiKey: state.settings.grsaiApiKey,
         openAiImageApiKey: state.settings.openAiImageApiKey,
         openAiImageBaseUrl: state.settings.openAiImageBaseUrl,
         grsaiHost: state.settings.grsaiHost,

@@ -1391,7 +1391,7 @@ installWorkflowRoutes(app, {
 });
 
 app.post("/api/test-image-key", async (req, res) => {
-  const { apiKey, googleApiKey, openAiImageApiKey, openAiImageBaseUrl, region, model, grsaiHost } = req.body || {};
+  const { apiKey, googleApiKey, grsaiApiKey, openAiImageApiKey, openAiImageBaseUrl, region, model, grsaiHost } = req.body || {};
   const effectiveApiKey = resolveDashScopeApiKey(apiKey);
 
   if (!model) {
@@ -1405,7 +1405,7 @@ app.post("/api/test-image-key", async (req, res) => {
     const effectiveGoogleApiKey = isOpenAiImageModel(model)
       ? resolveOpenAiImageApiKey(openAiImageApiKey || googleApiKey)
       : isGrsaiImageModel(model)
-        ? resolveGrsaiApiKey(googleApiKey)
+        ? resolveGrsaiApiKey(grsaiApiKey || googleApiKey)
         : resolveGeminiApiKey(googleApiKey);
     if (!effectiveGoogleApiKey) {
       return res.status(400).json({
@@ -1524,7 +1524,7 @@ app.post("/api/test-image-key", async (req, res) => {
 });
 
 app.post("/api/generate", async (req, res, next) => {
-  const { googleApiKey, openAiImageApiKey, openAiImageBaseUrl, slideAspect, payload, grsaiHost } = req.body || {};
+  const { googleApiKey, grsaiApiKey, openAiImageApiKey, openAiImageBaseUrl, slideAspect, payload, grsaiHost } = req.body || {};
 
   if (!isHostedImageModel(payload?.model)) {
     return next();
@@ -1533,7 +1533,7 @@ app.post("/api/generate", async (req, res, next) => {
   const effectiveGoogleApiKey = isOpenAiImageModel(payload.model)
     ? resolveOpenAiImageApiKey(openAiImageApiKey || googleApiKey)
     : isGrsaiImageModel(payload.model)
-      ? resolveGrsaiApiKey(googleApiKey)
+      ? resolveGrsaiApiKey(grsaiApiKey || googleApiKey)
       : resolveGeminiApiKey(googleApiKey);
 
   if (!effectiveGoogleApiKey) {
