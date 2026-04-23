@@ -18,6 +18,10 @@ const OPENAI_WORKFLOW_IMAGE_MODELS = new Set([
 ]);
 const DEFAULT_REGION = "beijing";
 const DEFAULT_DECORATION_LEVEL = "medium";
+const GPT_IMAGE_FIXED_PROMPT = [
+  "你是一位国际一流的学术PPT设计大师，杂志编辑风/平面设计大师，红点设计奖，精通从内容提炼、逻辑梳理、排版设计到配图的全流程PPT设计。",
+  "根据以上内容设计一页PPT。要求内部逻辑清晰、重点突出。字体采用相应字体，按照需要加粗或艺术化，一页不超两种字体。标题与正文字体大小越1:0.618，黄金比例。对比度足够，确保易读性。视觉效果通透美观。搭配的图片中，照片真实，测试结果图片准确无误，说明图简洁凝练清晰。",
+].join("\n");
 const CONSTANTS_RULES = [
   "整份演示遵循对比、重复、对齐、亲密四项排版原则。",
   "文字区保持清晰底色、稳定对比和明确层级。",
@@ -63,13 +67,23 @@ const DEFAULT_PREFERENCES = {
 };
 
 const PREFERENCE_LABELS = {
-  styleMode: { business: "商务", academic: "学术", creative: "创意" },
-  layoutVariety: { uniform: "统一稳定", balanced: "平衡变化", diverse: "尽量多样" },
-  detailLevel: { minimal: "偏简约", polished: "精致平衡", rich: "偏精细" },
-  visualDensity: { airy: "留白更多", balanced: "均衡信息量", dense: "信息更满" },
-  compositionFocus: { imageLead: "视觉主导", balanced: "图文平衡", textLead: "内容主导" },
-  dataNarrative: { clean: "清晰克制", balanced: "适度信息图", expressive: "更强视觉化" },
-  pageMood: { steady: "稳重统一", modern: "现代清爽", dramatic: "更有冲击" },
+  styleMode: { business: "商务汇报感", academic: "学术研究感", creative: "创意表达感" },
+  layoutVariety: { uniform: "版式统一稳态", balanced: "版式适度变化", diverse: "版式变化明显" },
+  detailLevel: { minimal: "装饰极简克制", polished: "装饰精致均衡", rich: "装饰细节丰富" },
+  visualDensity: { airy: "留白更充足", balanced: "疏密更均衡", dense: "信息更饱满" },
+  compositionFocus: { imageLead: "视觉主导", balanced: "图文均衡", textLead: "文字主导" },
+  dataNarrative: { clean: "数据清晰直给", balanced: "图表适度增强", expressive: "数据冲击更强" },
+  pageMood: { steady: "稳重专业", modern: "现代清晰", dramatic: "冲击更强" },
+};
+
+const PREFERENCE_PROMPT_KEYS = {
+  styleMode: "风格基调",
+  layoutVariety: "版式变化",
+  detailLevel: "装饰细节",
+  visualDensity: "画面疏密",
+  compositionFocus: "图文重心",
+  dataNarrative: "数据表现",
+  pageMood: "整体气质",
 };
 
 const DECORATION_LEVELS = {
@@ -881,16 +895,23 @@ function getAiProcessingModeLabel(value) {
   return AI_PROCESSING_MODES[normalizeAiProcessingMode(value)];
 }
 
+  function buildPreferencePromptPairs(preferences = DEFAULT_PREFERENCES) {
+    const normalized = normalizePreferences(preferences);
+    return [
+      `${PREFERENCE_PROMPT_KEYS.styleMode}=${PREFERENCE_LABELS.styleMode[normalized.styleMode]}`,
+      `${PREFERENCE_PROMPT_KEYS.layoutVariety}=${PREFERENCE_LABELS.layoutVariety[normalized.layoutVariety]}`,
+      `${PREFERENCE_PROMPT_KEYS.detailLevel}=${PREFERENCE_LABELS.detailLevel[normalized.detailLevel]}`,
+      `${PREFERENCE_PROMPT_KEYS.visualDensity}=${PREFERENCE_LABELS.visualDensity[normalized.visualDensity]}`,
+      `${PREFERENCE_PROMPT_KEYS.compositionFocus}=${PREFERENCE_LABELS.compositionFocus[normalized.compositionFocus]}`,
+      `${PREFERENCE_PROMPT_KEYS.dataNarrative}=${PREFERENCE_LABELS.dataNarrative[normalized.dataNarrative]}`,
+      `${PREFERENCE_PROMPT_KEYS.pageMood}=${PREFERENCE_LABELS.pageMood[normalized.pageMood]}`,
+    ];
+  }
+
   function buildPreferencePromptBlock(preferences) {
     return [
-      "【用户偏好】",
-      `风格定位：${PREFERENCE_LABELS.styleMode[preferences.styleMode]}。`,
-      `版式节奏：${PREFERENCE_LABELS.layoutVariety[preferences.layoutVariety]}。`,
-      `细节密度：${PREFERENCE_LABELS.detailLevel[preferences.detailLevel]}。`,
-      `版面疏密：${PREFERENCE_LABELS.visualDensity[preferences.visualDensity]}。`,
-      `图文重心：${PREFERENCE_LABELS.compositionFocus[preferences.compositionFocus]}。`,
-      `数据表达：${PREFERENCE_LABELS.dataNarrative[preferences.dataNarrative]}。`,
-      `整体氛围：${PREFERENCE_LABELS.pageMood[preferences.pageMood]}。`,
+      "【问卷风格锚点】",
+      ...buildPreferencePromptPairs(preferences),
     ].join("\n");
   }
 
@@ -1304,6 +1325,7 @@ function getAiProcessingModeLabel(value) {
       `【主题关键词】\n${safeThemeName}`,
       `【装饰强度】\n${getDecorationLevelLabel(decorationLevel)}`,
       buildPreferencePromptBlock(preferences),
+      "请将上面的问卷风格锚点直接吸收到基础风格描述中，不要只做泛化概括。",
       contentContextBlock,
       "【成熟风格选择】",
       "请先从瑞士编辑网格、咨询公司高管汇报、极简发布会、财经终端编辑风、博物馆展陈、科学期刊图版中选择一个最适合作为基底，也可以融合两个；输出时只呈现融合后的选择结果。",
@@ -1373,44 +1395,37 @@ function getAiProcessingModeLabel(value) {
   }
 
   async function runSplitPlan(apiKey, region, options) {
-    const { mainText, pageCount, splitPreset, referenceDigest, preferences, themeDefinition, decorationLevel, aiProcessingMode } = options;
+    const { mainText, pageCount, splitPreset, aiProcessingMode } = options;
 
     const systemPrompt = [
       "你是一位 PPT 内容策划师。",
-      "这一步只做拆分页和逻辑分段，不做最终上屏文案。",
+      "这一步只做拆分页和逻辑分段，不做最终上屏文案，不生成风格、版式、装饰或生图提示词。",
       "请只返回 JSON object，不要输出 markdown。",
       "字段必须包含 documentSummary、splitDiagnostics、pagePlan。",
       "pagePlan 每一项必须包含 pageNumber、pageType、pageTitle、pageContent、sectionTopic、estimatedChars、splitRisk、recommendedBand。",
     ].join("\n");
 
+    const modeInstruction =
+      aiProcessingMode === "strict"
+        ? "精确模式：尽量保留原文表达和篇章顺序，只做硬性分页、标题提炼和页面类型判断。"
+        : aiProcessingMode === "creative"
+          ? "创作模式：允许适度补出承上启下的标题和概括句，但不得脱离原文主题，不引入外部事实。"
+          : "均衡模式：适度梳理逻辑和小标题，让分页后的页面主题更清楚，但不扩展到风格或视觉层。";
+
     const userPrompt = [
-      buildHardConstraintBlock(),
-      buildPreferencePromptBlock(preferences),
-      buildThemeDefinitionBlock({ ...themeDefinition, decorationLevel }),
       `【AI 处理模式】\n${getAiProcessingModeLabel(aiProcessingMode)}`,
       "【拆分原则】",
       `目标页数：${pageCount}。`,
       "第 1 页必须是 cover。",
       "pageType 只能是 cover、catalog、chapter、content、data。",
-      "需要目录请用 catalog，需要章节过渡请用 chapter。",
-      "每页只承载一个主题或一个完整思想单元。",
-      "每页文字推荐 50-150 字，硬上限 200 字，超过 250 字视为 high 风险。",
-      "优先按主题转换、逻辑递进、对比关系切页。",
-      "这里进行分页结构判断，最终上屏润色交给后续页面准备阶段，保留完整逻辑。",
-      aiProcessingMode === "strict"
-        ? "精确模式：保留用户原句、篇幅和语气，只做硬性分页、标题抽取和类型标记。"
-        : "",
-      aiProcessingMode === "balanced"
-        ? "均衡模式：轻度梳理逻辑、提炼小标题，事实范围保持在主文本和参考材料内。"
-        : "",
-      aiProcessingMode === "creative"
-        ? "创作模式：在符合主文本主题和参考材料依据的前提下，适度补全桥接句、案例提示和说明语气，让单页更完整。若参考材料明确支持，可引入其中的事实补充。"
-        : "",
+      "需要目录请使用 catalog，需要章节过渡请使用 chapter。",
+      "每页只承载一个主主题或一个完整思想单元。",
+      "每页文字建议 50-150 字，200 字以内优先，超过 250 字视为高风险。",
+      "优先按照主题切换、逻辑递进、并列对比来切页。",
+      "这一阶段只输出结构化拆分结果；上屏内容整理、页面排版和视觉生成都留到后续阶段。",
+      modeInstruction,
       splitPreset ? `【本次拆分模板】\n${splitPreset}` : "",
-      referenceDigest?.summary ? `【参考材料摘要】\n${referenceDigest.summary}` : "",
-      referenceDigest?.usableFacts?.length ? `【可用补充事实】\n${referenceDigest.usableFacts.join("\n")}` : "",
-      referenceDigest?.cautions?.length ? `【参考材料注意事项】\n${referenceDigest.cautions.join("\n")}` : "",
-      "【用户主文本】",
+      "【用户原始内容】",
       mainText,
       "返回 JSON：",
       "{\"documentSummary\":\"...\",\"splitDiagnostics\":\"...\",\"pagePlan\":[{\"pageNumber\":1,\"pageType\":\"cover\",\"pageTitle\":\"...\",\"pageContent\":\"...\",\"sectionTopic\":\"...\",\"estimatedChars\":90,\"splitRisk\":\"low|medium|high\",\"recommendedBand\":\"minimal|balanced|standard|dense\"}]}",
@@ -1418,7 +1433,7 @@ function getAiProcessingModeLabel(value) {
 
     const result = await runAssistantJsonObject(apiKey, region, systemPrompt, userPrompt, "拆分页");
     return {
-      pages: normalizePagePlan(result.parsed.pagePlan || result.parsed.pages || [], decorationLevel),
+      pages: normalizePagePlan(result.parsed.pagePlan || result.parsed.pages || [], DEFAULT_DECORATION_LEVEL),
       documentSummary: stringifyStructuredField(result.parsed.documentSummary || result.parsed.summary || ""),
       splitDiagnostics: stringifyStructuredField(result.parsed.splitDiagnostics || ""),
       trace: { systemPrompt, userPrompt, responseText: result.text },
@@ -1640,20 +1655,6 @@ function getAiProcessingModeLabel(value) {
       job.statusText = `正在整理第 ${page.pageNumber}/${job.totalPages} 页...`;
       job.updatedAt = new Date().toISOString();
       try {
-        const lengthResult = await runPageExpansion(apiKey, region, {
-          enableExpansion,
-          targetChars,
-          maxChars,
-          pages: [page],
-          referenceDigest,
-        });
-        const preparedPage = Array.isArray(lengthResult.pages) ? lengthResult.pages[0] : null;
-        if (preparedPage) {
-          Object.assign(page, preparedPage);
-        }
-        if (lengthResult.trace) {
-          page.promptTrace.lengthControl = lengthResult.trace;
-        }
         preparePageForGeneration(job, page, "local-batch");
       } catch (error) {
         page.prepareDone = true;
@@ -1851,6 +1852,44 @@ function getAiProcessingModeLabel(value) {
     return page.pageTypePromptModule;
   }
 
+  function stripTitleFromOnscreenContent(title, content) {
+    const safeTitle = stringifyStructuredField(title || "").trim();
+    const lines = String(content || "").replace(/\r/g, "").split("\n");
+    while (lines.length && !lines[0].trim()) lines.shift();
+    if (!safeTitle || !lines.length) return lines.join("\n").trim();
+    const firstLine = lines[0].trim();
+    if (
+      firstLine === safeTitle
+      || firstLine === `标题：${safeTitle}`
+      || firstLine === `标题:${safeTitle}`
+      || firstLine.startsWith(`${safeTitle}：`)
+      || firstLine.startsWith(`${safeTitle}:`)
+    ) {
+      lines.shift();
+    }
+    return lines.join("\n").trim();
+  }
+
+  function buildGptFinalImagePrompt(page, pageStylePrompt = "") {
+    const title = stringifyStructuredField(page?.pageTitle || "").trim() || "未命名页面";
+    const cleanOnscreenContent = normalizeOnscreenContent(page?.onscreenContentText || page?.onscreenContent || page?.pageContent);
+    const body = stripTitleFromOnscreenContent(title, cleanOnscreenContent) || cleanOnscreenContent || title;
+    const style = stringifyStructuredField(pageStylePrompt || "").trim();
+    return [
+      GPT_IMAGE_FIXED_PROMPT,
+      style ? `可选风格提示词：\n${style}` : "",
+      `内容：\n标题：${title}\n正文：${body}`,
+    ].filter(Boolean).join("\n\n");
+  }
+
+  function getConfirmedThemeBasicOrThrow(job) {
+    const basicPrompt = stringifyStructuredField(job?.themeDefinition?.basic || "");
+    if (basicPrompt) return basicPrompt;
+    const error = new Error("当前项目还没有确认基础风格，请先完成风格生成并确认。");
+    error.status = 409;
+    throw error;
+  }
+
   function buildFinalImagePrompt(job, page, extraPrompt = "") {
     const cleanOnscreenContent = normalizeOnscreenContent(page.onscreenContentText || page.onscreenContent || page.pageContent);
     const layout = deriveLayoutMapping(page, cleanOnscreenContent);
@@ -1862,10 +1901,12 @@ function getAiProcessingModeLabel(value) {
     const pptLayoutPrinciples = buildPptLayoutPrinciplesBlock();
     const layoutInstruction = layout.instruction;
     const roleInstruction = "你是一位资深 PPT 视觉设计师，接下来要绘制的是一张可直接用于演示文稿的单页 PPT。请把正文内容转化为清晰、美观、可读的幻灯片画面。";
-    const basicPrompt = stringifyStructuredField(job.themeDefinition?.basic || "");
+    const basicPrompt = getConfirmedThemeBasicOrThrow(job);
+    const preferenceBlock = buildPreferencePromptBlock(job.preferences || DEFAULT_PREFERENCES);
     return [
       roleInstruction,
       basicPrompt ? `基础风格：${basicPrompt}` : "",
+      preferenceBlock,
       pptLayoutPrinciples,
       pageTypeTemplate,
       layoutInstruction,
@@ -1998,28 +2039,12 @@ function getAiProcessingModeLabel(value) {
         decorationLevel,
         normalizedPreferences,
       );
-      const normalizedReferenceFiles = normalizeReferenceFiles(referenceFiles)
-        .filter((item) => item.includeInSplit && (
-          (item.parseStatus === "parsed" && (item.extractedText || item.previewText))
-          || (item.category === "image" && item.parseStatus === "image" && (item.assetFileName || item.previewUrl))
-        ));
-      const referenceDigestResult = await runReferenceDigest(
-        effectiveApiKey,
-        region || DEFAULT_REGION,
-        mainText,
-        normalizedReferenceFiles,
-        normalizedPreferences,
-        normalizedThemeDefinition,
-      );
+      const referenceDigestResult = { digest: null, trace: null };
       const splitResult = await runSplitPlan(effectiveApiKey, region || DEFAULT_REGION, {
         mainText,
         pageCount: Math.max(1, Number(pageCount) || 6),
         splitPreset: String(splitTemplate || "").trim(),
         aiProcessingMode: normalizeAiProcessingMode(aiProcessingMode),
-        referenceDigest: referenceDigestResult.digest,
-        preferences: normalizedPreferences,
-        themeDefinition: normalizedThemeDefinition,
-        decorationLevel,
       });
       const normalizedEnableExpansion = Boolean(enableExpansion);
       const normalizedTargetChars = Math.max(0, Number(targetChars) || 0);
@@ -2045,7 +2070,7 @@ function getAiProcessingModeLabel(value) {
         referenceTrace: referenceDigestResult.trace,
         splitTrace: splitResult.trace,
         expansionTrace: {
-          mode: "background-page-by-page",
+          mode: "local-prepare-only",
           enableExpansion: normalizedEnableExpansion,
           targetChars: normalizedTargetChars,
           maxChars: normalizedMaxChars,
@@ -2060,7 +2085,7 @@ function getAiProcessingModeLabel(value) {
           enableExpansion: normalizedEnableExpansion,
           targetChars: normalizedTargetChars,
           maxChars: normalizedMaxChars,
-          referenceDigest: referenceDigestResult.digest,
+          referenceDigest: null,
         }).catch((error) => {
           job.status = "error";
           job.statusText = error.message || "逐页准备失败。";
@@ -2187,6 +2212,7 @@ function getAiProcessingModeLabel(value) {
       size,
       seed,
       extraPrompt,
+      pageStylePrompt,
       canvasImage,
       onscreenContent,
       enableGeminiGoogleSearch,
@@ -2220,31 +2246,57 @@ function getAiProcessingModeLabel(value) {
       }
       page.generationStatus = "preparing";
       page.generationError = "";
-      page.jitDecoration = await runJitDecorationExtraction(effectiveApiKey, region || DEFAULT_REGION, job, page);
-      page.promptTrace.jitDecoration = page.jitDecoration.trace || {
-        source: page.jitDecoration.source,
-        keywords: page.jitDecoration.keywords,
-        visualElementBrief: page.jitDecoration.visualElementBrief || "",
-        decorationPrompt: page.jitDecoration.decorationPrompt,
-        error: page.jitDecoration.error || "",
-      };
-      attachPageTypePromptModule(job, page);
-      const finalPrompt = buildFinalImagePrompt(job, page, String(extraPrompt || "").trim());
+      let finalPrompt = "";
+      let finalPromptTrace = null;
+      if (useOpenAiImage) {
+        finalPrompt = buildGptFinalImagePrompt(page, String(pageStylePrompt || "").trim());
+        page.jitDecoration = null;
+        page.pageTypePromptModule = null;
+        finalPromptTrace = {
+          promptMode: "gpt-simple",
+          pageStylePrompt: String(pageStylePrompt || "").trim(),
+          basicIncluded: false,
+          questionnaireAnchorIncluded: false,
+          layoutMapping: null,
+          pageTypeModule: null,
+          jitDecoration: null,
+        };
+      } else {
+        const basicPrompt = getConfirmedThemeBasicOrThrow(job);
+        const preferenceBlock = buildPreferencePromptBlock(job.preferences || DEFAULT_PREFERENCES);
+        page.jitDecoration = await runJitDecorationExtraction(effectiveApiKey, region || DEFAULT_REGION, job, page);
+        page.promptTrace.jitDecoration = page.jitDecoration.trace || {
+          source: page.jitDecoration.source,
+          keywords: page.jitDecoration.keywords,
+          visualElementBrief: page.jitDecoration.visualElementBrief || "",
+          decorationPrompt: page.jitDecoration.decorationPrompt,
+          error: page.jitDecoration.error || "",
+        };
+        attachPageTypePromptModule(job, page);
+        finalPrompt = buildFinalImagePrompt(job, page, String(extraPrompt || "").trim());
+        finalPromptTrace = {
+          promptMode: "standard",
+          pageStylePrompt: "",
+          basicIncluded: Boolean(basicPrompt),
+          questionnaireAnchorIncluded: Boolean(preferenceBlock),
+          layoutMapping: page.layoutMapping || null,
+          pageTypeModule: page.pageTypePromptModule || null,
+          jitDecoration: {
+            keywords: page.jitDecoration?.keywords || [],
+            visualElementBrief: page.jitDecoration?.visualElementBrief || "",
+            decorationPrompt: page.jitDecoration?.decorationPrompt || "",
+            decorationEntry: page.pageTypePromptModule?.decorationEntry || page.jitDecoration?.decorationPrompt || "",
+            source: page.jitDecoration?.source || "",
+          },
+        };
+      }
       page.generationStatus = "running";
       page.promptTrace.finalImage = {
         builtAt: new Date().toISOString(),
         model: selectedImageModel,
         prompt: finalPrompt,
         extraPrompt: String(extraPrompt || "").trim(),
-        layoutMapping: page.layoutMapping || null,
-        pageTypeModule: page.pageTypePromptModule || null,
-        jitDecoration: {
-          keywords: page.jitDecoration?.keywords || [],
-          visualElementBrief: page.jitDecoration?.visualElementBrief || "",
-          decorationPrompt: page.jitDecoration?.decorationPrompt || "",
-          decorationEntry: page.pageTypePromptModule?.decorationEntry || page.jitDecoration?.decorationPrompt || "",
-          source: page.jitDecoration?.source || "",
-        },
+        ...finalPromptTrace,
         hasCanvasImage: Boolean(canvasImage),
         googleSearchEnabled: Boolean(enableGeminiGoogleSearch && useGemini),
         searchMetadata: null,
@@ -2420,6 +2472,7 @@ function getAiProcessingModeLabel(value) {
       page.generationStatus = images.length > 0 ? "done" : "error";
       page.generationError = images.length > 0 ? "" : "没有拿到图片结果。";
       page.extraPrompt = String(extraPrompt || "").trim();
+      page.pageStylePrompt = String(pageStylePrompt || "").trim();
       const previousImages = Array.isArray(page.resultImages) ? page.resultImages.filter(Boolean) : [];
       const mergedImages = Array.from(new Set([
         ...images.filter(Boolean),
@@ -2452,6 +2505,7 @@ function getAiProcessingModeLabel(value) {
       jobId,
       pageId,
       extraPrompt,
+      pageStylePrompt,
       canvasImage,
       onscreenContent,
       enableGeminiGoogleSearch,
@@ -2459,6 +2513,7 @@ function getAiProcessingModeLabel(value) {
 
     const selectedImageModel = String(imageModel || WORKFLOW_IMAGE_MODEL).trim() || WORKFLOW_IMAGE_MODEL;
     const useGemini = GEMINI_WORKFLOW_IMAGE_MODELS.has(selectedImageModel);
+    const useOpenAiImage = OPENAI_WORKFLOW_IMAGE_MODELS.has(selectedImageModel);
     const effectiveApiKey = resolveDashScopeApiKey(apiKey);
 
     try {
@@ -2469,31 +2524,58 @@ function getAiProcessingModeLabel(value) {
         page.onscreenContentText = page.onscreenContent;
         preparePageForGeneration(job, page, "prompt-copy");
       }
-      page.jitDecoration = await runJitDecorationExtraction(effectiveApiKey, region || DEFAULT_REGION, job, page);
-      page.promptTrace.jitDecoration = page.jitDecoration.trace || {
-        source: page.jitDecoration.source,
-        keywords: page.jitDecoration.keywords,
-        visualElementBrief: page.jitDecoration.visualElementBrief || "",
-        decorationPrompt: page.jitDecoration.decorationPrompt,
-        error: page.jitDecoration.error || "",
-      };
-      attachPageTypePromptModule(job, page);
-      const finalPrompt = buildFinalImagePrompt(job, page, String(extraPrompt || "").trim());
+      let finalPrompt = "";
+      let finalPromptTrace = null;
+      if (useOpenAiImage) {
+        finalPrompt = buildGptFinalImagePrompt(page, String(pageStylePrompt || "").trim());
+        page.jitDecoration = null;
+        page.pageTypePromptModule = null;
+        finalPromptTrace = {
+          promptMode: "gpt-simple",
+          pageStylePrompt: String(pageStylePrompt || "").trim(),
+          basicIncluded: false,
+          questionnaireAnchorIncluded: false,
+          layoutMapping: null,
+          pageTypeModule: null,
+          jitDecoration: null,
+        };
+      } else {
+        const basicPrompt = getConfirmedThemeBasicOrThrow(job);
+        const preferenceBlock = buildPreferencePromptBlock(job.preferences || DEFAULT_PREFERENCES);
+        page.jitDecoration = await runJitDecorationExtraction(effectiveApiKey, region || DEFAULT_REGION, job, page);
+        page.promptTrace.jitDecoration = page.jitDecoration.trace || {
+          source: page.jitDecoration.source,
+          keywords: page.jitDecoration.keywords,
+          visualElementBrief: page.jitDecoration.visualElementBrief || "",
+          decorationPrompt: page.jitDecoration.decorationPrompt,
+          error: page.jitDecoration.error || "",
+        };
+        attachPageTypePromptModule(job, page);
+        finalPrompt = buildFinalImagePrompt(job, page, String(extraPrompt || "").trim());
+        finalPromptTrace = {
+          promptMode: "standard",
+          pageStylePrompt: "",
+          basicIncluded: Boolean(basicPrompt),
+          questionnaireAnchorIncluded: Boolean(preferenceBlock),
+          layoutMapping: page.layoutMapping || null,
+          pageTypeModule: page.pageTypePromptModule || null,
+          jitDecoration: {
+            keywords: page.jitDecoration?.keywords || [],
+            visualElementBrief: page.jitDecoration?.visualElementBrief || "",
+            decorationPrompt: page.jitDecoration?.decorationPrompt || "",
+            decorationEntry: page.pageTypePromptModule?.decorationEntry || page.jitDecoration?.decorationPrompt || "",
+            source: page.jitDecoration?.source || "",
+          },
+        };
+      }
       page.extraPrompt = String(extraPrompt || "").trim();
+      page.pageStylePrompt = String(pageStylePrompt || "").trim();
       page.promptTrace.finalImage = {
         builtAt: new Date().toISOString(),
         model: selectedImageModel,
         prompt: finalPrompt,
         extraPrompt: String(extraPrompt || "").trim(),
-        layoutMapping: page.layoutMapping || null,
-        pageTypeModule: page.pageTypePromptModule || null,
-        jitDecoration: {
-          keywords: page.jitDecoration?.keywords || [],
-          visualElementBrief: page.jitDecoration?.visualElementBrief || "",
-          decorationPrompt: page.jitDecoration?.decorationPrompt || "",
-          decorationEntry: page.pageTypePromptModule?.decorationEntry || page.jitDecoration?.decorationPrompt || "",
-          source: page.jitDecoration?.source || "",
-        },
+        ...finalPromptTrace,
         hasCanvasImage: Boolean(canvasImage),
         googleSearchEnabled: Boolean(enableGeminiGoogleSearch && useGemini),
         searchMetadata: null,

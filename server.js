@@ -37,6 +37,7 @@ const GRSAI_HOSTS = {
   domestic: "https://grsai.dakka.com.cn",
   overseas: "https://grsaiapi.com",
 };
+const OPENAI_IMAGE_DEFAULT_HOST = "https://api.bltcy.ai";
 const OPENAI_IMAGE_GENERATIONS_PATH = "/v1/images/generations";
 const GEMINI_IMAGE_MODELS = new Set([
   "gemini-3.1-flash-image-preview",
@@ -136,7 +137,7 @@ function resolveOpenAiImageEndpoint(endpointOrHost) {
     || process.env.OPENAI_IMAGE_GENERATIONS_URL
     || process.env.OPENAI_IMAGE_BASE_URL
     || process.env.OPENAI_BASE_URL
-    || "https://api.openai.com",
+    || OPENAI_IMAGE_DEFAULT_HOST,
   ).trim().replace(/\/+$/, "");
   if (new RegExp(`${OPENAI_IMAGE_GENERATIONS_PATH.replace(/\//g, "\\/")}$`, "i").test(value)) {
     return value;

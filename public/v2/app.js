@@ -15,6 +15,7 @@ const OPENAI_WORKFLOW_MODELS = new Set([
   "gpt-image-2",
 ]);
 const EDIT_MODEL = "wan2.7-image-pro";
+const OPENAI_IMAGE_DEFAULT_HOST = "https://api.bltcy.ai";
 const MAX_REVISE_BOXES = 2;
 
 const DEFAULT_PREFERENCES = {
@@ -29,12 +30,22 @@ const DEFAULT_PREFERENCES = {
 
 const PREFERENCE_LABELS = {
   styleMode: { business: "商务汇报感", academic: "学术研究感", creative: "创意表达感" },
-  layoutVariety: { uniform: "版式尽量统一", balanced: "版式适度变化", diverse: "版式明显变化" },
-  detailLevel: { minimal: "细节尽量克制", polished: "细节精致均衡", rich: "细节明显丰富" },
-  visualDensity: { airy: "留白明显更多", balanced: "留白信息均衡", dense: "信息明显更满" },
-  compositionFocus: { imageLead: "画面更抢眼", balanced: "图文同等重要", textLead: "文字信息优先" },
-  dataNarrative: { clean: "数据清楚直给", balanced: "数据图表增强", expressive: "数据更有视觉冲击" },
-  pageMood: { steady: "稳重专业", modern: "现代清晰", dramatic: "强烈冲击" },
+  layoutVariety: { uniform: "版式统一稳态", balanced: "版式适度变化", diverse: "版式变化明显" },
+  detailLevel: { minimal: "装饰极简克制", polished: "装饰精致均衡", rich: "装饰细节丰富" },
+  visualDensity: { airy: "留白更充足", balanced: "疏密更均衡", dense: "信息更饱满" },
+  compositionFocus: { imageLead: "视觉主导", balanced: "图文均衡", textLead: "文字主导" },
+  dataNarrative: { clean: "数据清晰直给", balanced: "图表适度增强", expressive: "数据冲击更强" },
+  pageMood: { steady: "稳重专业", modern: "现代清晰", dramatic: "冲击更强" },
+};
+
+const PREFERENCE_PROMPT_KEYS = {
+  styleMode: "风格基调",
+  layoutVariety: "版式变化",
+  detailLevel: "装饰细节",
+  visualDensity: "画面疏密",
+  compositionFocus: "图文重心",
+  dataNarrative: "数据表现",
+  pageMood: "整体气质",
 };
 
 const AI_PROCESSING_MODE_LABELS = {
@@ -100,13 +111,13 @@ const THEME_PROMPT_SECTIONS = [
 
 const state = {
   activeTab: "smart",
-  smartStep: "split",
+  smartStep: "model",
   settings: {
     apiKey: "",
     googleApiKey: "",
     grsaiApiKey: "",
     openAiImageApiKey: "",
-    openAiImageBaseUrl: "https://api.openai.com/v1/images/generations",
+    openAiImageBaseUrl: OPENAI_IMAGE_DEFAULT_HOST,
     workflowImageModel: PPT_MODEL,
     enableGeminiGoogleSearch: false,
     grsaiHost: "domestic",
@@ -206,9 +217,17 @@ function cacheElements() {
     "themeSummaryPreview",
     "themePromptTabs",
     "themeModelPrompt",
+    "workflowImageModelEntry",
+    "workflowModelHint",
+    "confirmWorkflowModelBtn",
     "quickApiKey",
+    "quickGeminiKeyField",
     "quickGoogleApiKey",
+    "quickGrsaiKeyField",
     "quickGrsaiApiKey",
+    "quickOpenAiImageKeyField",
+    "quickOpenAiImageApiKey",
+    "quickGrsaiHostField",
     "quickGrsaiHost",
     "quickTestApiKeyBtn",
       "workflowPageCount",
@@ -252,6 +271,9 @@ function cacheElements() {
     "overlayLayer",
     "generateCurrentPageBtn",
     "cancelGenerateCurrentPageBtn",
+    "gptPageStyleField",
+    "gptPageStylePrompt",
+    "pageExtraPromptField",
     "pageExtraPrompt",
     "pagePromptTrace",
     "pageResultStrip",
@@ -491,6 +513,7 @@ function serializePageDraftsForStorage() {
       sourceOnscreenTitle: draft.sourceOnscreenTitle || "",
       sourceOnscreenContent: draft.sourceOnscreenContent || "",
       extraPrompt: draft.extraPrompt || "",
+      pageStylePrompt: draft.pageStylePrompt || "",
       overlays: (draft.overlays || []).filter((item) => /^https?:\/\//i.test(item.src) || item.src.startsWith("/generated-images/")),
     },
   ]));
@@ -535,11 +558,12 @@ function loadState() {
   const parsed = safeJsonParse(localStorage.getItem(STORAGE_KEY) || "");
   if (!parsed || typeof parsed !== "object") return;
   state.activeTab = ["smart", "history", "revise", "settings"].includes(parsed.activeTab) ? parsed.activeTab : "smart";
-  state.smartStep = ["split", "theme", "pages"].includes(parsed.smartStep) ? parsed.smartStep : "split";
+  state.smartStep = ["model", "split", "theme", "pages"].includes(parsed.smartStep) ? parsed.smartStep : "model";
   if (state.smartStep === "theme" && !parsed.workflowJob && !parsed.themeDefinition) {
     state.smartStep = "split";
   }
   state.settings = { ...state.settings, ...(parsed.settings || {}) };
+  state.settings.openAiImageBaseUrl = normalizeOpenAiImageBaseUrl(state.settings.openAiImageBaseUrl);
   state.workspaceZoom = clamp(Number(parsed.workspaceZoom || 100), 50, 140);
   state.themeName = String(parsed.themeName || "");
   state.decorationLevel = String(parsed.decorationLevel || "medium");
@@ -593,11 +617,13 @@ function applyStateToUi() {
   el.googleApiKey.value = state.settings.googleApiKey || "";
   if (el.grsaiApiKey) el.grsaiApiKey.value = state.settings.grsaiApiKey || "";
   if (el.openAiImageApiKey) el.openAiImageApiKey.value = state.settings.openAiImageApiKey || "";
-  if (el.openAiImageBaseUrl) el.openAiImageBaseUrl.value = state.settings.openAiImageBaseUrl || "https://api.openai.com/v1/images/generations";
+  if (el.openAiImageBaseUrl) el.openAiImageBaseUrl.value = normalizeOpenAiImageBaseUrl(state.settings.openAiImageBaseUrl);
   if (el.quickApiKey) el.quickApiKey.value = state.settings.apiKey || "";
   if (el.quickGoogleApiKey) el.quickGoogleApiKey.value = state.settings.googleApiKey || "";
   if (el.quickGrsaiApiKey) el.quickGrsaiApiKey.value = state.settings.grsaiApiKey || "";
+  if (el.quickOpenAiImageApiKey) el.quickOpenAiImageApiKey.value = state.settings.openAiImageApiKey || "";
   if (el.quickGrsaiHost) el.quickGrsaiHost.value = state.settings.grsaiHost || "domestic";
+  if (el.workflowImageModelEntry) el.workflowImageModelEntry.value = state.settings.workflowImageModel || PPT_MODEL;
   el.workflowImageModel.value = state.settings.workflowImageModel || PPT_MODEL;
   if (el.enableGeminiGoogleSearch) {
     el.enableGeminiGoogleSearch.checked = Boolean(state.settings.enableGeminiGoogleSearch);
@@ -641,19 +667,37 @@ function getCurrentPreferences() {
   };
 }
 
+function getPreferencePromptPairs(preferences = getCurrentPreferences()) {
+  return [
+    `${PREFERENCE_PROMPT_KEYS.styleMode}=${PREFERENCE_LABELS.styleMode[preferences.styleMode]}`,
+    `${PREFERENCE_PROMPT_KEYS.layoutVariety}=${PREFERENCE_LABELS.layoutVariety[preferences.layoutVariety]}`,
+    `${PREFERENCE_PROMPT_KEYS.detailLevel}=${PREFERENCE_LABELS.detailLevel[preferences.detailLevel]}`,
+    `${PREFERENCE_PROMPT_KEYS.visualDensity}=${PREFERENCE_LABELS.visualDensity[preferences.visualDensity]}`,
+    `${PREFERENCE_PROMPT_KEYS.compositionFocus}=${PREFERENCE_LABELS.compositionFocus[preferences.compositionFocus]}`,
+    `${PREFERENCE_PROMPT_KEYS.dataNarrative}=${PREFERENCE_LABELS.dataNarrative[preferences.dataNarrative]}`,
+    `${PREFERENCE_PROMPT_KEYS.pageMood}=${PREFERENCE_LABELS.pageMood[preferences.pageMood]}`,
+  ];
+}
+
+function getConfirmedWorkflowThemeBasic() {
+  return String(state.workflowJob?.themeDefinition?.basic || "").trim();
+}
+
+function isStandardWorkflowThemeReady() {
+  return usingGptSimpleWorkflow() || Boolean(getConfirmedWorkflowThemeBasic());
+}
+
+function ensureStandardWorkflowThemeReady(message = "请先生成并确认风格，再进入逐页生成。") {
+  if (isStandardWorkflowThemeReady()) return true;
+  switchSmartStep(state.workflowJob ? "theme" : "split", { silent: true });
+  setStatus(message, "error");
+  return false;
+}
+
 function renderPreferenceSummary() {
   const current = getCurrentPreferences();
   state.preferences = current;
-  el.preferenceSummary.textContent = [
-    "当前默认：",
-    PREFERENCE_LABELS.styleMode[current.styleMode],
-    PREFERENCE_LABELS.layoutVariety[current.layoutVariety],
-    PREFERENCE_LABELS.detailLevel[current.detailLevel],
-    PREFERENCE_LABELS.visualDensity[current.visualDensity],
-    PREFERENCE_LABELS.compositionFocus[current.compositionFocus],
-    PREFERENCE_LABELS.dataNarrative[current.dataNarrative],
-    PREFERENCE_LABELS.pageMood[current.pageMood],
-  ].join("、");
+  el.preferenceSummary.textContent = `问卷风格锚点：${getPreferencePromptPairs(current).join("；")}`;
 }
 
 function getPageTypeMeta(type) {
@@ -679,22 +723,36 @@ function switchTab(tab) {
   saveState();
 }
 
-function switchSmartStep(step) {
-  state.smartStep = step;
+function switchSmartStep(step, options = {}) {
+  let nextStep = step;
+  if (nextStep === "theme" && usingGptSimpleWorkflow()) {
+    nextStep = state.workflowJob ? "pages" : "split";
+  }
+  if (nextStep === "pages" && !isStandardWorkflowThemeReady()) {
+    nextStep = state.workflowJob ? "theme" : "split";
+    if (!options.silent) {
+      setStatus("请先生成并确认风格，再进入逐页生成。", "error");
+    }
+  }
+  state.smartStep = nextStep;
   document.querySelectorAll(".ribbon-step").forEach((button) => {
-    button.classList.toggle("is-active", button.dataset.step === step);
+    button.classList.toggle("is-active", button.dataset.step === nextStep);
+    button.classList.toggle("is-disabled", button.dataset.step === "theme" && usingGptSimpleWorkflow());
+    if (button.dataset.step === "theme") button.disabled = usingGptSimpleWorkflow();
   });
   document.querySelectorAll(".smart-stage").forEach((panel) => {
-    panel.classList.toggle("is-active", panel.dataset.stepPanel === step);
+    panel.classList.toggle("is-active", panel.dataset.stepPanel === nextStep);
   });
   const meta = {
+    model: "先确定最终生图模型，后续工作流会按模型切换。",
     split: "先把内容拆分和字数倾向定下来，再匹配稳定的成熟风格。",
     theme: "AI 会根据拆分后的页面结构自动选择风格基底，用户输入作为修饰。",
     pages: state.workflowJob
       ? `${state.workflowJob.readyToGeneratePages || 0} 页已可直接生成，${state.workflowJob.preparedPages || 0}/${state.workflowJob.totalPages || 0} 页已完成准备。`
       : "左侧看进度，中间改上屏内容，右侧直接生成当前页。",
   };
-  if (el.workflowRibbonMeta) el.workflowRibbonMeta.textContent = meta[step];
+  if (el.workflowRibbonMeta) el.workflowRibbonMeta.textContent = meta[nextStep];
+  syncWorkflowModeUi();
   saveState();
 }
 
@@ -739,6 +797,10 @@ function usingOpenAiWorkflowModel() {
   return OPENAI_WORKFLOW_MODELS.has(getCurrentWorkflowImageModel());
 }
 
+function usingGptSimpleWorkflow() {
+  return usingOpenAiWorkflowModel();
+}
+
 function usingGrsaiWorkflowModel() {
   return GRSAI_WORKFLOW_MODELS.has(getCurrentWorkflowImageModel());
 }
@@ -762,19 +824,25 @@ function hasHostedImageApiKey() {
   return Boolean(state.settings.googleApiKey || state.serverConfig?.configuredKeys?.gemini);
 }
 
+function normalizeOpenAiImageBaseUrl(value) {
+  const normalized = String(value || "").trim().replace(/\/+$/, "");
+  if (!normalized) return OPENAI_IMAGE_DEFAULT_HOST;
+  if (normalized === "https://api.openai.com" || normalized === "https://api.openai.com/v1/images/generations") {
+    return OPENAI_IMAGE_DEFAULT_HOST;
+  }
+  return normalized;
+}
+
 function getCurrentHostedImageKeyPayload() {
   return {
     googleApiKey: state.settings.googleApiKey,
     grsaiApiKey: state.settings.grsaiApiKey,
     openAiImageApiKey: state.settings.openAiImageApiKey,
-    openAiImageBaseUrl: state.settings.openAiImageBaseUrl || "https://api.openai.com/v1/images/generations",
+    openAiImageBaseUrl: normalizeOpenAiImageBaseUrl(state.settings.openAiImageBaseUrl),
   };
 }
 
-function syncWorkflowModelOptions() {
-  if (!el.workflowImageModel) return;
-  const currentValue = state.settings.workflowImageModel || el.workflowImageModel.value || PPT_MODEL;
-  el.workflowImageModel.innerHTML = [
+const WORKFLOW_IMAGE_MODEL_OPTIONS = [
     `<option value="nano-banana-2">Grsai Nano Banana 2</option>`,
     `<option value="nano-banana-pro">Grsai Nano Banana Pro</option>`,
     `<option value="gemini-3.1-pro">Grsai Gemini 3.1 Pro</option>`,
@@ -783,10 +851,62 @@ function syncWorkflowModelOptions() {
     `<option value="gemini-3-pro-image-preview">Nano Banana Pro</option>`,
     `<option value="gemini-2.5-flash-image">Nano Banana</option>`,
     `<option value="wan2.7-image-pro">Wan 2.7</option>`,
-  ].join("");
-  el.workflowImageModel.value = currentValue;
-  if (el.workflowImageModel.value !== currentValue) {
-    el.workflowImageModel.value = PPT_MODEL;
+];
+
+function getWorkflowModelSelects() {
+  return [el.workflowImageModelEntry, el.workflowImageModel].filter(Boolean);
+}
+
+function syncWorkflowModelOptions() {
+  const selects = getWorkflowModelSelects();
+  if (!selects.length) return;
+  const currentValue = state.settings.workflowImageModel || selects[0].value || PPT_MODEL;
+  let normalizedValue = currentValue;
+  selects.forEach((select) => {
+    select.innerHTML = WORKFLOW_IMAGE_MODEL_OPTIONS.join("");
+    select.value = normalizedValue;
+    if (select.value !== normalizedValue) {
+      normalizedValue = PPT_MODEL;
+      select.value = normalizedValue;
+    }
+  });
+  state.settings.workflowImageModel = normalizedValue;
+}
+
+function setWorkflowImageModel(value) {
+  state.settings.workflowImageModel = String(value || PPT_MODEL).trim() || PPT_MODEL;
+  getWorkflowModelSelects().forEach((select) => {
+    select.value = state.settings.workflowImageModel;
+  });
+  syncGeminiSearchControls();
+  if (document.querySelector(".ribbon-step")) {
+    switchSmartStep(state.smartStep || "model", { silent: true });
+    return;
+  }
+  syncWorkflowModeUi();
+}
+
+function syncWorkflowModeUi() {
+  const isGpt = usingGptSimpleWorkflow();
+  const isGemini = usingGeminiWorkflowModel();
+  const isGrsai = usingGrsaiWorkflowModel();
+  document.body.dataset.workflowMode = isGpt ? "gpt" : "standard";
+  document.body.dataset.workflowProvider = isGpt ? "openai" : isGrsai ? "grsai" : isGemini ? "gemini" : "standard";
+  if (el.quickGeminiKeyField) el.quickGeminiKeyField.hidden = !isGemini;
+  if (el.quickGrsaiKeyField) el.quickGrsaiKeyField.hidden = !isGrsai;
+  if (el.quickGrsaiHostField) el.quickGrsaiHostField.hidden = !isGrsai;
+  if (el.quickOpenAiImageKeyField) el.quickOpenAiImageKeyField.hidden = !isGpt;
+  document.querySelectorAll('[data-step="theme"]').forEach((button) => {
+    button.disabled = isGpt;
+    button.classList.toggle("is-disabled", isGpt);
+  });
+  if (el.workflowModelHint) {
+    el.workflowModelHint.textContent = isGpt
+      ? "GPT Image 2 使用轻链路：拆分内容后逐页填写风格并直接生图。"
+      : "当前模型使用完整链路：拆分内容后匹配全局风格，再逐页确认并生成。";
+  }
+  if (state.smartStep === "theme" && isGpt) {
+    state.smartStep = state.workflowJob ? "pages" : "split";
   }
 }
 
@@ -805,6 +925,7 @@ function sanitizeRecoveredWorkflowJob(job) {
     }
     normalizedPage.visualElementsPrompt = String(normalizedPage.visualElementsPrompt || "");
     normalizedPage.visualElementsDisplay = String(normalizedPage.visualElementsDisplay || normalizedPage.visualElementsPrompt || "");
+    normalizedPage.pageStylePrompt = String(normalizedPage.pageStylePrompt || "");
     normalizedPage.resultImages = Array.isArray(normalizedPage.resultImages)
       ? Array.from(new Set(normalizedPage.resultImages.filter(Boolean)))
       : [];
@@ -844,6 +965,7 @@ function ensurePageDraft(page) {
       sourceOnscreenTitle: canonicalSplit.title,
       sourceOnscreenContent: composeOnscreenContentFromEditors(canonicalSplit.title, canonicalSplit.body),
       extraPrompt: page.extraPrompt || "",
+      pageStylePrompt: page.pageStylePrompt || "",
       overlays: [],
       drawingLayer: "",
     };
@@ -870,6 +992,12 @@ function ensurePageDraft(page) {
   }
   if (!state.pageDrafts[page.id].extraPrompt && page.extraPrompt) {
     state.pageDrafts[page.id].extraPrompt = page.extraPrompt;
+  }
+  if (typeof state.pageDrafts[page.id].pageStylePrompt !== "string") {
+    state.pageDrafts[page.id].pageStylePrompt = "";
+  }
+  if (!state.pageDrafts[page.id].pageStylePrompt && page.pageStylePrompt) {
+    state.pageDrafts[page.id].pageStylePrompt = page.pageStylePrompt;
   }
   if (!Array.isArray(state.pageDrafts[page.id].overlays)) {
     state.pageDrafts[page.id].overlays = [];
@@ -912,7 +1040,7 @@ function syncPageDraftFromPage(page, { force = false } = {}) {
 
 function updateThemeView() {
   el.confirmThemeBtn.disabled = !state.themeDefinition;
-  el.goSplitBtn.disabled = !state.themeConfirmed && !state.workflowJob;
+  el.goSplitBtn.disabled = !isStandardWorkflowThemeReady();
   el.themeSummaryPreview.textContent = state.themeDefinition?.displaySummaryZh || "风格摘要会显示在这里。";
   el.themeModelPrompt.textContent = state.themePromptTrace
     ? stringifyTrace(state.themePromptTrace)
@@ -1086,7 +1214,7 @@ function restoreHistoryProject() {
   ensureSelectedPage();
   renderHistoryProjects();
   switchTab("smart");
-  switchSmartStep(state.smartStep);
+  switchSmartStep(state.smartStep, { silent: true });
   renderPagesWorkbench();
   setStatus(`已恢复项目：${buildProjectTitle(state.workflowJob || { pages: [] })}`, "success");
   saveState();
@@ -2156,6 +2284,7 @@ function bindEvents() {
   document.querySelectorAll(".ribbon-step").forEach((button) => {
     button.addEventListener("click", () => {
       const next = button.dataset.step;
+      if (next === "theme" && usingGptSimpleWorkflow()) return;
       if (next === "pages" && !state.workflowJob) return;
       switchSmartStep(next);
     });
@@ -2182,8 +2311,13 @@ function bindEvents() {
   el.generateThemeBtn.addEventListener("click", generateTheme);
   el.cancelThemeBtn.addEventListener("click", () => cancelAction("theme"));
   el.confirmThemeBtn.addEventListener("click", confirmTheme);
+  el.confirmWorkflowModelBtn?.addEventListener("click", () => {
+    setWorkflowImageModel(el.workflowImageModelEntry?.value || state.settings.workflowImageModel || PPT_MODEL);
+    switchSmartStep("split");
+    saveState();
+  });
   el.goSplitBtn.addEventListener("click", () => switchSmartStep(state.workflowJob ? "pages" : "split"));
-  el.backToThemeBtn.addEventListener("click", () => switchSmartStep("theme"));
+  el.backToThemeBtn.addEventListener("click", () => switchSmartStep("model"));
   el.backToSplitBtn.addEventListener("click", () => switchSmartStep("split"));
   el.pickReferenceFilesBtn.addEventListener("click", () => el.referenceFilesInput.click());
   el.referenceFilesInput.addEventListener("change", handleReferenceFiles);
@@ -2223,6 +2357,13 @@ function bindEvents() {
     const draft = ensurePageDraft(page);
     if (!draft) return;
     draft.extraPrompt = el.pageExtraPrompt.value;
+    saveState();
+  });
+  el.gptPageStylePrompt?.addEventListener("input", () => {
+    const page = getSelectedPage();
+    const draft = ensurePageDraft(page);
+    if (!draft) return;
+    draft.pageStylePrompt = el.gptPageStylePrompt.value;
     saveState();
   });
   el.repreparePageBtn.addEventListener("click", reprepareCurrentPage);
@@ -2276,10 +2417,11 @@ function bindEvents() {
   });
   el.openAiImageApiKey?.addEventListener("input", () => {
     state.settings.openAiImageApiKey = el.openAiImageApiKey.value.trim();
+    if (el.quickOpenAiImageApiKey) el.quickOpenAiImageApiKey.value = state.settings.openAiImageApiKey;
     saveState();
   });
   el.openAiImageBaseUrl?.addEventListener("input", () => {
-    state.settings.openAiImageBaseUrl = el.openAiImageBaseUrl.value.trim();
+    state.settings.openAiImageBaseUrl = normalizeOpenAiImageBaseUrl(el.openAiImageBaseUrl.value);
     saveState();
   });
   el.quickApiKey?.addEventListener("input", () => {
@@ -2297,9 +2439,17 @@ function bindEvents() {
     if (el.grsaiApiKey) el.grsaiApiKey.value = state.settings.grsaiApiKey;
     saveState();
   });
+  el.quickOpenAiImageApiKey?.addEventListener("input", () => {
+    state.settings.openAiImageApiKey = el.quickOpenAiImageApiKey.value.trim();
+    if (el.openAiImageApiKey) el.openAiImageApiKey.value = state.settings.openAiImageApiKey;
+    saveState();
+  });
   el.workflowImageModel.addEventListener("change", () => {
-    state.settings.workflowImageModel = el.workflowImageModel.value || PPT_MODEL;
-    syncGeminiSearchControls();
+    setWorkflowImageModel(el.workflowImageModel.value || PPT_MODEL);
+    saveState();
+  });
+  el.workflowImageModelEntry?.addEventListener("change", () => {
+    setWorkflowImageModel(el.workflowImageModelEntry.value || PPT_MODEL);
     saveState();
   });
   el.grsaiHost?.addEventListener("change", () => {
@@ -2414,6 +2564,7 @@ function formatOnscreenPreview(value) {
 }
 
 async function runSplit() {
+  setWorkflowImageModel(el.workflowImageModelEntry?.value || el.workflowImageModel?.value || state.settings.workflowImageModel || PPT_MODEL);
   state.workflowContent = el.workflowContent.value.trim();
   state.workflowPageCount = clamp(Number(el.workflowPageCount.value || 8), 2, 120);
   state.aiProcessingMode = el.aiProcessingMode.value || "balanced";
@@ -2465,10 +2616,6 @@ async function runSplit() {
         enableExpansion: state.workflowEnableExpansion,
         targetChars: state.workflowEnableExpansion ? state.workflowTargetChars : 0,
         maxChars: state.workflowMaxChars,
-        referenceFiles: state.parsedFiles,
-        themeDefinition: state.themeDefinition,
-        preferences: state.preferences,
-        decorationLevel: state.decorationLevel,
       }),
     });
     state.workflowJobId = data.jobId;
@@ -2477,9 +2624,9 @@ async function runSplit() {
     ensureSelectedPage();
     startWorkflowPolling();
     renderPagesWorkbench();
-    state.themeConfirmed = false;
-    switchSmartStep("theme");
-    setStatus("内容已拆分，下一步根据页面结构匹配风格。", "success");
+    state.themeConfirmed = usingGptSimpleWorkflow();
+    switchSmartStep(usingGptSimpleWorkflow() ? "pages" : "theme");
+    setStatus(usingGptSimpleWorkflow() ? "内容已拆分，可以逐页填写 GPT 风格并生成。" : "内容已拆分，下一步根据页面结构匹配风格。", "success");
     saveState();
   } catch (error) {
     if (isAbortError(error)) {
@@ -2591,6 +2738,7 @@ function renderPageList() {
 async function batchGenerateReadyPages() {
   const job = state.workflowJob;
   if (!job?.pages?.length) return;
+  if (!ensureStandardWorkflowThemeReady("请先生成并确认风格，再进行批量生成。")) return;
 
   await ensureServerConfigReady();
   const selectedImageModel = getCurrentWorkflowImageModel();
@@ -2636,6 +2784,7 @@ async function batchGenerateReadyPages() {
           seed: state.settings.seed,
           enableGeminiGoogleSearch: Boolean(state.settings.enableGeminiGoogleSearch && usingGeminiWorkflowModel()),
           extraPrompt: draft.extraPrompt || "",
+          pageStylePrompt: draft.pageStylePrompt || "",
           onscreenContent: formatOnscreenPreview(draft.onscreenContent || page.onscreenContentText || page.onscreenContent || ""),
           canvasImage: "",
         }),
@@ -2669,7 +2818,7 @@ async function testApiKeys() {
   state.settings.googleApiKey = el.googleApiKey.value.trim();
   state.settings.grsaiApiKey = el.grsaiApiKey?.value.trim() || "";
   state.settings.openAiImageApiKey = el.openAiImageApiKey?.value.trim() || "";
-  state.settings.openAiImageBaseUrl = el.openAiImageBaseUrl?.value.trim() || "https://api.openai.com/v1/images/generations";
+  state.settings.openAiImageBaseUrl = normalizeOpenAiImageBaseUrl(el.openAiImageBaseUrl?.value);
   state.settings.workflowImageModel = el.workflowImageModel.value || PPT_MODEL;
   state.settings.grsaiHost = el.grsaiHost?.value || "domestic";
   state.settings.region = el.region.value;
@@ -2818,11 +2967,12 @@ function syncCurrentPageGenerateUi() {
   if (!el.generateCurrentPageBtn || !el.cancelGenerateCurrentPageBtn) return;
   const page = getSelectedPage();
   const pageActive = page ? isPageGenerating(page.id) : false;
+  const themeReady = isStandardWorkflowThemeReady();
   if (pageActive) {
     el.generateCurrentPageBtn.disabled = true;
     el.generateCurrentPageBtn.textContent = "\u751f\u6210\u4e2d...";
   } else {
-    el.generateCurrentPageBtn.disabled = !page;
+    el.generateCurrentPageBtn.disabled = !page || !themeReady;
     el.generateCurrentPageBtn.textContent = page?.generated ? "\u91cd\u65b0\u751f\u6210\u8be5\u9875" : "\u751f\u6210\u8be5\u9875";
     delete el.generateCurrentPageBtn.dataset.idleText;
   }
@@ -2832,7 +2982,13 @@ function syncCurrentPageGenerateUi() {
     el.viewCurrentPageLargeBtn.disabled = !page?.baseImage || pageActive;
   }
   if (el.copyPagePromptBtn) {
-    el.copyPagePromptBtn.disabled = !page || pageActive;
+    el.copyPagePromptBtn.disabled = !page || pageActive || !themeReady;
+  }
+  if (el.batchGenerateReadyBtn) {
+    const hasCandidates = Array.isArray(state.workflowJob?.pages) && state.workflowJob.pages.some((item) => item.readyToGenerate && !item.generated);
+    if (el.batchGenerateReadyBtn.textContent !== "批量生成中...") {
+      el.batchGenerateReadyBtn.disabled = !hasCandidates || !themeReady;
+    }
   }
   if (el.exportWorkflowPptBtn) {
     const hasWorkflowPages = Array.isArray(state.workflowJob?.pages) && state.workflowJob.pages.length > 0;
@@ -2998,6 +3154,9 @@ function renderPagesWorkbench() {
     if (el.pageOnscreenTitleEditor) el.pageOnscreenTitleEditor.value = "";
     if (el.pageOnscreenBodyEditor) el.pageOnscreenBodyEditor.value = "";
     if (el.pageOnscreenEditor) el.pageOnscreenEditor.value = "";
+    if (el.gptPageStylePrompt) el.gptPageStylePrompt.value = "";
+    if (el.gptPageStyleField) el.gptPageStyleField.hidden = !usingGptSimpleWorkflow();
+    if (el.pageExtraPromptField) el.pageExtraPromptField.hidden = usingGptSimpleWorkflow();
     el.pageExtraPrompt.value = "";
     el.pagePromptTrace.textContent = "";
     if (el.viewCurrentPageLargeBtn) el.viewCurrentPageLargeBtn.disabled = true;
@@ -3020,6 +3179,9 @@ function renderPagesWorkbench() {
   if (el.pageOnscreenTitleEditor) el.pageOnscreenTitleEditor.value = draft.onscreenTitle;
   if (el.pageOnscreenBodyEditor) el.pageOnscreenBodyEditor.value = draft.onscreenBody;
   if (el.pageOnscreenPreview) el.pageOnscreenPreview.innerHTML = "";
+  if (el.gptPageStyleField) el.gptPageStyleField.hidden = !usingGptSimpleWorkflow();
+  if (el.pageExtraPromptField) el.pageExtraPromptField.hidden = usingGptSimpleWorkflow();
+  if (el.gptPageStylePrompt) el.gptPageStylePrompt.value = draft.pageStylePrompt || "";
   el.pageExtraPrompt.value = draft.extraPrompt || "";
   el.pagePromptTrace.textContent = stringifyTrace(page.promptTrace);
   if (el.viewCurrentPageLargeBtn) {
@@ -3101,13 +3263,16 @@ async function aiRepolishCurrentPage() {
 async function copyCurrentPagePrompt() {
   const page = getSelectedPage();
   if (!page) return;
+  if (!ensureStandardWorkflowThemeReady("请先生成并确认风格，再复制标准链路提示词。")) return;
   const draft = ensurePageDraft(page);
   draft.extraPrompt = el.pageExtraPrompt.value.trim();
+  draft.pageStylePrompt = el.gptPageStylePrompt?.value.trim() || "";
   draft.onscreenContent = updateCurrentPageDraftFromEditors();
   const promptTrace = page.promptTrace?.finalImage || null;
   const pageContent = String(page.onscreenContentText || page.onscreenContent || page.pageContent || "").trim();
   const promptIsCurrent = Boolean(promptTrace?.prompt)
     && String(promptTrace.extraPrompt || "").trim() === draft.extraPrompt
+    && String(promptTrace.pageStylePrompt || "").trim() === draft.pageStylePrompt
     && pageContent === String(draft.onscreenContent || "").trim();
   let prompt = promptIsCurrent ? getFinalPromptFromPage(page) : "";
 
@@ -3132,6 +3297,7 @@ async function copyCurrentPagePrompt() {
           jobId: state.workflowJob?.id,
           pageId: page.id,
           extraPrompt: draft.extraPrompt,
+          pageStylePrompt: draft.pageStylePrompt,
           canvasImage,
           onscreenContent: draft.onscreenContent,
           enableGeminiGoogleSearch: state.settings.enableGeminiGoogleSearch,
@@ -3169,6 +3335,7 @@ async function copyCurrentPagePrompt() {
 async function generateCurrentPage() {
   const page = getSelectedPage();
   if (!page) return;
+  if (!ensureStandardWorkflowThemeReady("请先生成并确认风格，再生成当前页面。")) return;
   const currentPageId = page.id;
   const currentPageNumber = page.pageNumber;
 
@@ -3187,13 +3354,19 @@ async function generateCurrentPage() {
 
   const draft = ensurePageDraft(page);
   draft.extraPrompt = el.pageExtraPrompt.value.trim();
+  draft.pageStylePrompt = el.gptPageStylePrompt?.value.trim() || "";
   draft.onscreenContent = updateCurrentPageDraftFromEditors();
   const requestKey = getPageGenerateRequestKey(page.id);
   const signal = startCancelableAction(requestKey, null, null);
   page.generationStatus = "preparing";
   page.generationError = "";
   renderPagesWorkbench();
-  setStatus(`\u7b2c${page.pageNumber}\u9875\u5df2\u8fdb\u5165\u751f\u6210\u961f\u5217\uff0c\u6b63\u5728\u51c6\u5907\u63d0\u793a\u8bcd...`, "running");
+  setStatus(
+    usingGptSimpleWorkflow() && !draft.pageStylePrompt
+      ? `第${page.pageNumber}页未填写 GPT 风格提示词，将按固定提示词和内容生成。`
+      : `\u7b2c${page.pageNumber}\u9875\u5df2\u8fdb\u5165\u751f\u6210\u961f\u5217\uff0c\u6b63\u5728\u51c6\u5907\u63d0\u793a\u8bcd...`,
+    "running"
+  );
   try {
     const canvasImage = await exportCurrentArtboard();
     const generatePromise = apiJson("/api/workflow/page/generate-v2", {
@@ -3215,6 +3388,7 @@ async function generateCurrentPage() {
         size: getWorkflowGenerationSize(),
         seed: state.settings.seed,
         extraPrompt: draft.extraPrompt,
+        pageStylePrompt: draft.pageStylePrompt,
         onscreenContent: draft.onscreenContent,
         canvasImage,
       }),

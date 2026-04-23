@@ -55,7 +55,12 @@
             </div>
 
             <section class="smart-ribbon">
-              <button class="ribbon-step is-active" type="button" data-step="split">
+              <button class="ribbon-step is-active" type="button" data-step="model">
+                <span>0</span>
+                <strong>选择模型</strong>
+              </button>
+              <div class="ribbon-arrow" aria-hidden="true"></div>
+              <button class="ribbon-step" type="button" data-step="split">
                 <span>1</span>
                 <strong>内容与拆分</strong>
               </button>
@@ -72,13 +77,39 @@
             </section>
 
             <div class="smart-stage-shell">
+              <section class="smart-stage is-active" data-step-panel="model">
+                <div class="model-stage-grid">
+                  <article class="glass-card">
+                    <h2>选择最终生图模型</h2>
+                    <label class="field">
+                      <span>最终生图模型</span>
+                      <select id="workflowImageModelEntry">
+                        <option value="nano-banana-2">Grsai Nano Banana 2</option>
+                        <option value="nano-banana-pro">Grsai Nano Banana Pro</option>
+                        <option value="gemini-3.1-pro">Grsai Gemini 3.1 Pro</option>
+                        <option value="gpt-image-2">OpenAI GPT Image 2</option>
+                        <option value="gemini-3.1-flash-image-preview">Nano Banana 2</option>
+                        <option value="gemini-3-pro-image-preview">Nano Banana Pro</option>
+                        <option value="gemini-2.5-flash-image">Nano Banana</option>
+                        <option value="wan2.7-image-pro">Wan 2.7</option>
+                      </select>
+                    </label>
+                    <div class="inline-summary" id="workflowModelHint"></div>
+                    <div class="stage-footer">
+                      <span></span>
+                      <button class="btn primary" type="button" id="confirmWorkflowModelBtn">确认模型并继续</button>
+                    </div>
+                  </article>
+                </div>
+              </section>
+
               <section class="smart-stage" data-step-panel="theme">
                 <div class="theme-stage-grid">
                   <article class="glass-card">
                     <h2>开头问卷</h2>
                     <div class="survey-grid">
                       <label class="field">
-                        <span>风格模式</span>
+                        <span>风格基调</span>
                         <select id="prefStyleMode">
                           <option value="business">商务汇报感</option>
                           <option value="academic">学术研究感</option>
@@ -86,43 +117,43 @@
                         </select>
                       </label>
                       <label class="field">
-                        <span>版式变化</span>
+                        <span>版式变化幅度</span>
                         <select id="prefLayoutVariety">
-                          <option value="uniform">版式尽量统一</option>
+                          <option value="uniform">版式统一稳态</option>
                           <option value="balanced">版式适度变化</option>
-                          <option value="diverse">版式明显变化</option>
+                          <option value="diverse">版式变化明显</option>
                         </select>
                       </label>
                       <label class="field">
-                        <span>视觉细节</span>
+                        <span>装饰与细节</span>
                         <select id="prefDetailLevel">
-                          <option value="minimal">细节尽量克制</option>
-                          <option value="polished">细节精致均衡</option>
-                          <option value="rich">细节明显丰富</option>
+                          <option value="minimal">装饰极简克制</option>
+                          <option value="polished">装饰精致均衡</option>
+                          <option value="rich">装饰细节丰富</option>
                         </select>
                       </label>
                       <label class="field">
-                        <span>留白与信息量</span>
+                        <span>画面疏密</span>
                         <select id="prefVisualDensity">
-                          <option value="airy">留白明显更多</option>
-                          <option value="balanced">留白信息均衡</option>
-                          <option value="dense">信息明显更满</option>
+                          <option value="airy">留白更充足</option>
+                          <option value="balanced">疏密更均衡</option>
+                          <option value="dense">信息更饱满</option>
                         </select>
                       </label>
                       <label class="field">
-                        <span>图文主次</span>
+                        <span>图文重心</span>
                         <select id="prefCompositionFocus">
-                          <option value="imageLead">画面更抢眼</option>
-                          <option value="balanced">图文同等重要</option>
-                          <option value="textLead">文字信息优先</option>
+                          <option value="imageLead">视觉主导</option>
+                          <option value="balanced">图文均衡</option>
+                          <option value="textLead">文字主导</option>
                         </select>
                       </label>
                       <label class="field">
-                        <span>数据页表达</span>
+                        <span>数据表现</span>
                         <select id="prefDataNarrative">
-                          <option value="clean">数据清楚直给</option>
-                          <option value="balanced">数据图表增强</option>
-                          <option value="expressive">数据更有视觉冲击</option>
+                          <option value="clean">数据清晰直给</option>
+                          <option value="balanced">图表适度增强</option>
+                          <option value="expressive">数据冲击更强</option>
                         </select>
                       </label>
                       <label class="field">
@@ -130,7 +161,7 @@
                         <select id="prefPageMood">
                           <option value="steady">稳重专业</option>
                           <option value="modern">现代清晰</option>
-                          <option value="dramatic">强烈冲击</option>
+                          <option value="dramatic">冲击更强</option>
                         </select>
                       </label>
                     </div>
@@ -171,7 +202,7 @@
                 </div>
               </section>
 
-              <section class="smart-stage is-active" data-step-panel="split">
+              <section class="smart-stage" data-step-panel="split">
                 <div class="split-stage-grid">
                   <article class="glass-card">
                     <h2>输入文本</h2>
@@ -180,15 +211,19 @@
                         <span>DashScope / Qwen API Key</span>
                         <input id="quickApiKey" type="password" placeholder="用于内容拆分和风格匹配；本机已配置可留空" />
                       </label>
-                      <label class="field">
+                      <label class="field" id="quickGeminiKeyField" hidden>
                         <span>Gemini API Key</span>
                         <input id="quickGoogleApiKey" type="password" placeholder="用于 Gemini 生图；本机已配置可留空" />
                       </label>
-                      <label class="field">
+                      <label class="field" id="quickGrsaiKeyField" hidden>
                         <span>Grsai API Key</span>
                         <input id="quickGrsaiApiKey" type="password" placeholder="用于 Grsai Nano Banana / Gemini 3.1 Pro；本机已配置可留空" />
                       </label>
-                      <label class="field">
+                      <label class="field" id="quickOpenAiImageKeyField" hidden>
+                        <span>GPT Image API Key</span>
+                        <input id="quickOpenAiImageApiKey" type="password" placeholder="用于 gpt-image-2；本机已配置可留空" />
+                      </label>
+                      <label class="field" id="quickGrsaiHostField" hidden>
                         <span>Grsai Host</span>
                         <select id="quickGrsaiHost">
                           <option value="domestic">国内直连</option>
@@ -246,7 +281,7 @@
 
                 </div>
                 <div class="stage-footer">
-                  <button class="btn ghost" type="button" id="backToThemeBtn">风格设置</button>
+                  <button class="btn ghost" type="button" id="backToThemeBtn">上一步</button>
                   <div class="action-group">
                     <button class="btn ghost cancel-btn" type="button" id="cancelSplitBtn" hidden>取消</button>
                     <button class="btn primary" type="button" id="runSplitBtn">确认总内容并拆分</button>
@@ -313,7 +348,11 @@
                       <button class="btn secondary" type="button" id="copyPagePromptBtn" disabled>复制提示词</button>
                       <button class="btn primary" type="button" id="generateCurrentPageBtn">生成该页</button>
                     </div>
-                    <label class="field field-stack">
+                    <label class="field field-stack" id="gptPageStyleField" hidden>
+                      <span>GPT 该页风格提示词</span>
+                      <textarea id="gptPageStylePrompt" rows="4" placeholder="例如：浅色风格，更加艺术化，颜色要求使用浅蓝和银灰，版面通透。"></textarea>
+                    </label>
+                    <label class="field field-stack" id="pageExtraPromptField">
                       <span>额外要求 / 该页修改提示词</span>
                       <textarea id="pageExtraPrompt" rows="5" placeholder="例如：第一次生成时希望更简洁，或这页改成更强的数据对比感。"></textarea>
                     </label>
@@ -437,7 +476,7 @@
                   </label>
                   <label class="field">
                     <span>GPT Image 接口地址</span>
-                    <input id="openAiImageBaseUrl" type="url" placeholder="https://你的Host/v1/images/generations" />
+                    <input id="openAiImageBaseUrl" type="url" placeholder="https://api.bltcy.ai" />
                   </label>
                   <label class="field">
                     <span>最终生图模型</span>
