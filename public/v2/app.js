@@ -120,6 +120,9 @@ const state = {
     configuredKeys: {
       dashscope: false,
       hostedImage: false,
+      grsai: false,
+      gemini: false,
+      openAiImage: false,
     },
   },
   workspaceZoom: 100,
@@ -751,16 +754,12 @@ function hasDashScopeApiKey() {
 
 function hasHostedImageApiKey() {
   if (usingOpenAiWorkflowModel()) {
-    return Boolean(
-      state.settings.openAiImageApiKey
-      || state.serverConfig?.configuredKeys?.openAiImage
-      || state.serverConfig?.configuredKeys?.hostedImage,
-    );
+    return Boolean(state.settings.openAiImageApiKey || state.serverConfig?.configuredKeys?.openAiImage);
   }
   if (usingGrsaiWorkflowModel()) {
-    return Boolean(state.settings.grsaiApiKey || state.serverConfig?.configuredKeys?.hostedImage);
+    return Boolean(state.settings.grsaiApiKey || state.serverConfig?.configuredKeys?.grsai);
   }
-  return Boolean(state.settings.googleApiKey || state.serverConfig?.configuredKeys?.hostedImage);
+  return Boolean(state.settings.googleApiKey || state.serverConfig?.configuredKeys?.gemini);
 }
 
 function getCurrentHostedImageKeyPayload() {
@@ -1674,6 +1673,9 @@ async function refreshServerConfig() {
       configuredKeys: {
         dashscope: Boolean(data?.configuredKeys?.dashscope),
         hostedImage: Boolean(data?.configuredKeys?.hostedImage),
+        grsai: Boolean(data?.configuredKeys?.grsai),
+        gemini: Boolean(data?.configuredKeys?.gemini),
+        openAiImage: Boolean(data?.configuredKeys?.openAiImage),
       },
       workflowModels: data?.workflowModels || null,
     };

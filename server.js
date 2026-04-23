@@ -1320,6 +1320,8 @@ app.get("/api/health", (_req, res) => {
     configuredKeys: {
       dashscope: Boolean(resolveDashScopeApiKey("")),
       hostedImage: Boolean(resolveHostedImageApiKey("")),
+      grsai: Boolean(resolveGrsaiApiKey("")),
+      gemini: Boolean(resolveGeminiApiKey("")),
       openAiImage: Boolean(resolveOpenAiImageApiKey("")),
     },
     workflowModels: {
@@ -1403,9 +1405,9 @@ app.post("/api/test-image-key", async (req, res) => {
 
   if (isHostedImageModel(model)) {
     const effectiveGoogleApiKey = isOpenAiImageModel(model)
-      ? resolveOpenAiImageApiKey(openAiImageApiKey || googleApiKey)
+      ? resolveOpenAiImageApiKey(openAiImageApiKey)
       : isGrsaiImageModel(model)
-        ? resolveGrsaiApiKey(grsaiApiKey || googleApiKey)
+        ? resolveGrsaiApiKey(grsaiApiKey)
         : resolveGeminiApiKey(googleApiKey);
     if (!effectiveGoogleApiKey) {
       return res.status(400).json({
@@ -1531,9 +1533,9 @@ app.post("/api/generate", async (req, res, next) => {
   }
 
   const effectiveGoogleApiKey = isOpenAiImageModel(payload.model)
-    ? resolveOpenAiImageApiKey(openAiImageApiKey || googleApiKey)
+    ? resolveOpenAiImageApiKey(openAiImageApiKey)
     : isGrsaiImageModel(payload.model)
-      ? resolveGrsaiApiKey(grsaiApiKey || googleApiKey)
+      ? resolveGrsaiApiKey(grsaiApiKey)
       : resolveGeminiApiKey(googleApiKey);
 
   if (!effectiveGoogleApiKey) {

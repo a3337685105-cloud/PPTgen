@@ -2198,9 +2198,9 @@ function getAiProcessingModeLabel(value) {
     const useOpenAiImage = OPENAI_WORKFLOW_IMAGE_MODELS.has(selectedImageModel);
     const effectiveApiKey = resolveDashScopeApiKey(apiKey);
     const effectiveGoogleApiKey = useOpenAiImage
-      ? resolveOpenAiImageApiKey(openAiImageApiKey || googleApiKey)
+      ? resolveOpenAiImageApiKey(openAiImageApiKey)
       : useGrsai
-        ? resolveGrsaiApiKey(grsaiApiKey || googleApiKey)
+        ? resolveGrsaiApiKey(grsaiApiKey)
         : resolveGeminiApiKey(googleApiKey);
 
     if ((useGemini || useGrsai || useOpenAiImage) && !effectiveGoogleApiKey) {
