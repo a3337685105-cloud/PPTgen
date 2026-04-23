@@ -2175,6 +2175,8 @@ function getAiProcessingModeLabel(value) {
     const {
       apiKey,
       googleApiKey,
+      openAiImageApiKey,
+      openAiImageBaseUrl,
       region,
       grsaiHost,
       imageModel,
@@ -2195,7 +2197,7 @@ function getAiProcessingModeLabel(value) {
     const useOpenAiImage = OPENAI_WORKFLOW_IMAGE_MODELS.has(selectedImageModel);
     const effectiveApiKey = resolveDashScopeApiKey(apiKey);
     const effectiveGoogleApiKey = useOpenAiImage
-      ? resolveOpenAiImageApiKey(googleApiKey)
+      ? resolveOpenAiImageApiKey(openAiImageApiKey || googleApiKey)
       : useGrsai
         ? resolveGrsaiApiKey(googleApiKey)
         : resolveGeminiApiKey(googleApiKey);
@@ -2275,6 +2277,7 @@ function getAiProcessingModeLabel(value) {
           apiKey: effectiveGoogleApiKey,
           payload: openAiPayload,
           slideAspect,
+          baseUrl: openAiImageBaseUrl,
         });
         images = (responsePayload.output?.choices?.[0]?.message?.content || [])
           .filter((item) => item.type === "image" && item.image)

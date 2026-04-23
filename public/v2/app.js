@@ -104,6 +104,8 @@ const state = {
   settings: {
     apiKey: "",
     googleApiKey: "",
+    openAiImageApiKey: "",
+    openAiImageBaseUrl: "https://api.openai.com",
     workflowImageModel: PPT_MODEL,
     enableGeminiGoogleSearch: false,
     grsaiHost: "domestic",
@@ -277,6 +279,8 @@ function cacheElements() {
     "reviseResultStrip",
     "apiKey",
     "googleApiKey",
+    "openAiImageApiKey",
+    "openAiImageBaseUrl",
     "workflowImageModel",
     "enableGeminiGoogleSearch",
     "geminiGoogleSearchField",
@@ -581,6 +585,8 @@ function applyStateToUi() {
   syncSplitExpansionControls();
   el.apiKey.value = state.settings.apiKey || "";
   el.googleApiKey.value = state.settings.googleApiKey || "";
+  if (el.openAiImageApiKey) el.openAiImageApiKey.value = state.settings.openAiImageApiKey || "";
+  if (el.openAiImageBaseUrl) el.openAiImageBaseUrl.value = state.settings.openAiImageBaseUrl || "https://api.openai.com";
   if (el.quickApiKey) el.quickApiKey.value = state.settings.apiKey || "";
   if (el.quickGoogleApiKey) el.quickGoogleApiKey.value = state.settings.googleApiKey || "";
   if (el.quickGrsaiHost) el.quickGrsaiHost.value = state.settings.grsaiHost || "domestic";
@@ -721,6 +727,10 @@ function usingGeminiWorkflowModel() {
   return GEMINI_WORKFLOW_MODELS.has(getCurrentWorkflowImageModel());
 }
 
+function usingOpenAiWorkflowModel() {
+  return OPENAI_WORKFLOW_MODELS.has(getCurrentWorkflowImageModel());
+}
+
 function usingHostedWorkflowModel() {
   const model = getCurrentWorkflowImageModel();
   return GEMINI_WORKFLOW_MODELS.has(model) || GRSAI_WORKFLOW_MODELS.has(model) || OPENAI_WORKFLOW_MODELS.has(model);
@@ -731,7 +741,22 @@ function hasDashScopeApiKey() {
 }
 
 function hasHostedImageApiKey() {
+  if (usingOpenAiWorkflowModel()) {
+    return Boolean(
+      state.settings.openAiImageApiKey
+      || state.serverConfig?.configuredKeys?.openAiImage
+      || state.serverConfig?.configuredKeys?.hostedImage,
+    );
+  }
   return Boolean(state.settings.googleApiKey || state.serverConfig?.configuredKeys?.hostedImage);
+}
+
+function getCurrentHostedImageKeyPayload() {
+  return {
+    googleApiKey: state.settings.googleApiKey,
+    openAiImageApiKey: state.settings.openAiImageApiKey,
+    openAiImageBaseUrl: state.settings.openAiImageBaseUrl || "https://api.openai.com",
+  };
 }
 
 function syncWorkflowModelOptions() {
@@ -2072,6 +2097,8 @@ async function sendRevise() {
         workflowRouteVersion: 2,
         apiKey: state.settings.apiKey,
         googleApiKey: state.settings.googleApiKey,
+        openAiImageApiKey: state.settings.openAiImageApiKey,
+        openAiImageBaseUrl: state.settings.openAiImageBaseUrl,
         region: state.settings.region,
         slideAspect: state.settings.slideAspect,
         payload,
@@ -2224,6 +2251,14 @@ function bindEvents() {
   el.googleApiKey.addEventListener("input", () => {
     state.settings.googleApiKey = el.googleApiKey.value.trim();
     if (el.quickGoogleApiKey) el.quickGoogleApiKey.value = state.settings.googleApiKey;
+    saveState();
+  });
+  el.openAiImageApiKey?.addEventListener("input", () => {
+    state.settings.openAiImageApiKey = el.openAiImageApiKey.value.trim();
+    saveState();
+  });
+  el.openAiImageBaseUrl?.addEventListener("input", () => {
+    state.settings.openAiImageBaseUrl = el.openAiImageBaseUrl.value.trim();
     saveState();
   });
   el.quickApiKey?.addEventListener("input", () => {
@@ -2562,6 +2597,8 @@ async function batchGenerateReadyPages() {
         body: JSON.stringify({
           apiKey: state.settings.apiKey,
           googleApiKey: state.settings.googleApiKey,
+          openAiImageApiKey: state.settings.openAiImageApiKey,
+          openAiImageBaseUrl: state.settings.openAiImageBaseUrl,
           grsaiHost: state.settings.grsaiHost,
           region: state.settings.region,
           imageModel: selectedImageModel,
@@ -2603,6 +2640,8 @@ async function batchGenerateReadyPages() {
 async function testApiKeys() {
   state.settings.apiKey = el.apiKey.value.trim();
   state.settings.googleApiKey = el.googleApiKey.value.trim();
+  state.settings.openAiImageApiKey = el.openAiImageApiKey?.value.trim() || "";
+  state.settings.openAiImageBaseUrl = el.openAiImageBaseUrl?.value.trim() || "https://api.openai.com";
   state.settings.workflowImageModel = el.workflowImageModel.value || PPT_MODEL;
   state.settings.grsaiHost = el.grsaiHost?.value || "domestic";
   state.settings.region = el.region.value;
@@ -2627,6 +2666,8 @@ async function testApiKeys() {
         body: JSON.stringify({
           apiKey: state.settings.apiKey,
           googleApiKey: state.settings.googleApiKey,
+          openAiImageApiKey: state.settings.openAiImageApiKey,
+          openAiImageBaseUrl: state.settings.openAiImageBaseUrl,
           grsaiHost: state.settings.grsaiHost,
           region: state.settings.region,
           model: selectedWorkflowModel,
@@ -3052,6 +3093,9 @@ async function copyCurrentPagePrompt() {
         signal,
         body: JSON.stringify({
           apiKey: state.settings.apiKey,
+          googleApiKey: state.settings.googleApiKey,
+          openAiImageApiKey: state.settings.openAiImageApiKey,
+          openAiImageBaseUrl: state.settings.openAiImageBaseUrl,
           region: state.settings.region,
           imageModel: getCurrentWorkflowImageModel(),
           jobId: state.workflowJob?.id,
@@ -3128,6 +3172,8 @@ async function generateCurrentPage() {
       body: JSON.stringify({
         apiKey: state.settings.apiKey,
         googleApiKey: state.settings.googleApiKey,
+        openAiImageApiKey: state.settings.openAiImageApiKey,
+        openAiImageBaseUrl: state.settings.openAiImageBaseUrl,
         grsaiHost: state.settings.grsaiHost,
         region: state.settings.region,
         imageModel: selectedImageModel,

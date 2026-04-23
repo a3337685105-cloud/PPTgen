@@ -129,8 +129,8 @@ function resolveGrsaiHost(host) {
   return (GRSAI_HOSTS[value] || GRSAI_HOSTS.domestic).replace(/\/+$/, "");
 }
 
-function resolveOpenAiImageBaseUrl() {
-  return String(process.env.OPENAI_IMAGE_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com").trim().replace(/\/+$/, "");
+function resolveOpenAiImageBaseUrl(baseUrl) {
+  return String(baseUrl || process.env.OPENAI_IMAGE_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com").trim().replace(/\/+$/, "");
 }
 
 function extensionToMimeType(extension) {
@@ -438,8 +438,8 @@ function buildGrsaiResultUrl(host) {
   return `${resolveGrsaiHost(host)}/v1/draw/result`;
 }
 
-function buildOpenAiImageGenerationsUrl() {
-  return `${resolveOpenAiImageBaseUrl()}/v1/images/generations`;
+function buildOpenAiImageGenerationsUrl(baseUrl) {
+  return `${resolveOpenAiImageBaseUrl(baseUrl)}/v1/images/generations`;
 }
 
 async function requestJsonViaFetch({ url, method = "POST", headers = {}, body }) {
@@ -513,11 +513,11 @@ async function normalizeOpenAiImageGenerationResponse(data, model) {
   };
 }
 
-async function requestOpenAiImageGenerate({ apiKey, payload, slideAspect }) {
+async function requestOpenAiImageGenerate({ apiKey, payload, slideAspect, baseUrl }) {
   const body = buildOpenAiImageGenerationBody({ payload, slideAspect });
   const parsed = await requestJsonViaFetch({
     method: "POST",
-    url: buildOpenAiImageGenerationsUrl(),
+    url: buildOpenAiImageGenerationsUrl(baseUrl),
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
@@ -1309,6 +1309,7 @@ app.get("/api/health", (_req, res) => {
     configuredKeys: {
       dashscope: Boolean(resolveDashScopeApiKey("")),
       hostedImage: Boolean(resolveHostedImageApiKey("")),
+      openAiImage: Boolean(resolveOpenAiImageApiKey("")),
     },
     workflowModels: {
       assistant: process.env.WORKFLOW_ASSISTANT_MODEL || "qwen3.6-plus",
@@ -1379,7 +1380,7 @@ installWorkflowRoutes(app, {
 });
 
 app.post("/api/test-image-key", async (req, res) => {
-  const { apiKey, googleApiKey, region, model, grsaiHost } = req.body || {};
+  const { apiKey, googleApiKey, openAiImageApiKey, openAiImageBaseUrl, region, model, grsaiHost } = req.body || {};
   const effectiveApiKey = resolveDashScopeApiKey(apiKey);
 
   if (!model) {
@@ -1391,7 +1392,7 @@ app.post("/api/test-image-key", async (req, res) => {
 
   if (isHostedImageModel(model)) {
     const effectiveGoogleApiKey = isOpenAiImageModel(model)
-      ? resolveOpenAiImageApiKey(googleApiKey)
+      ? resolveOpenAiImageApiKey(openAiImageApiKey || googleApiKey)
       : isGrsaiImageModel(model)
         ? resolveGrsaiApiKey(googleApiKey)
         : resolveGeminiApiKey(googleApiKey);
@@ -1406,7 +1407,7 @@ app.post("/api/test-image-key", async (req, res) => {
       return res.json({
         ok: true,
         provider: "openai-image",
-        message: `OpenAI 图片接口 Key 已填写，模型 ${model} 将使用 ${resolveOpenAiImageBaseUrl()}。`,
+        message: `OpenAI 图片接口 Key 已填写，模型 ${model} 将使用 ${resolveOpenAiImageBaseUrl(openAiImageBaseUrl)}。`,
       });
     }
 
@@ -1512,14 +1513,14 @@ app.post("/api/test-image-key", async (req, res) => {
 });
 
 app.post("/api/generate", async (req, res, next) => {
-  const { googleApiKey, slideAspect, payload, grsaiHost } = req.body || {};
+  const { googleApiKey, openAiImageApiKey, openAiImageBaseUrl, slideAspect, payload, grsaiHost } = req.body || {};
 
   if (!isHostedImageModel(payload?.model)) {
     return next();
   }
 
   const effectiveGoogleApiKey = isOpenAiImageModel(payload.model)
-    ? resolveOpenAiImageApiKey(googleApiKey)
+    ? resolveOpenAiImageApiKey(openAiImageApiKey || googleApiKey)
     : isGrsaiImageModel(payload.model)
       ? resolveGrsaiApiKey(googleApiKey)
       : resolveGeminiApiKey(googleApiKey);
@@ -1537,6 +1538,7 @@ app.post("/api/generate", async (req, res, next) => {
         apiKey: effectiveGoogleApiKey,
         payload,
         slideAspect,
+        baseUrl: openAiImageBaseUrl,
       });
       return res.json(normalized);
     }
