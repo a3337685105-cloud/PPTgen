@@ -13,6 +13,9 @@ const GRSAI_WORKFLOW_IMAGE_MODELS = new Set([
   "nano-banana-pro",
   "gemini-3.1-pro",
 ]);
+const OPENAI_WORKFLOW_IMAGE_MODELS = new Set([
+  "gpt-image-2",
+]);
 const DEFAULT_REGION = "beijing";
 const DEFAULT_DECORATION_LEVEL = "medium";
 const CONSTANTS_RULES = [
@@ -492,10 +495,12 @@ function installWorkflowRoutes(app, deps) {
     parseJsonResponse,
     requestGeminiJson,
     requestGrsaiGenerate,
+    requestOpenAiImageGenerate,
     resolveDashScopeApiKey = (value) => String(value || process.env.DASHSCOPE_API_KEY || process.env.QWEN_API_KEY || "").trim(),
-    resolveHostedImageApiKey = (value) => String(value || process.env.GRSAI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim(),
+    resolveHostedImageApiKey = (value) => String(value || process.env.OPENAI_IMAGE_API_KEY || process.env.OPENAI_API_KEY || process.env.GRSAI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim(),
     resolveGrsaiApiKey = (value) => String(value || process.env.GRSAI_API_KEY || "").trim(),
     resolveGeminiApiKey = (value) => String(value || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim(),
+    resolveOpenAiImageApiKey = (value) => String(value || process.env.OPENAI_IMAGE_API_KEY || process.env.OPENAI_API_KEY || "").trim(),
     normalizeGeminiGenerateResponse,
     buildGeminiModelUrl,
     normalizeGeminiAspectRatio,
@@ -2187,15 +2192,18 @@ function getAiProcessingModeLabel(value) {
     const selectedImageModel = String(imageModel || WORKFLOW_IMAGE_MODEL).trim() || WORKFLOW_IMAGE_MODEL;
     const useGemini = GEMINI_WORKFLOW_IMAGE_MODELS.has(selectedImageModel);
     const useGrsai = GRSAI_WORKFLOW_IMAGE_MODELS.has(selectedImageModel);
+    const useOpenAiImage = OPENAI_WORKFLOW_IMAGE_MODELS.has(selectedImageModel);
     const effectiveApiKey = resolveDashScopeApiKey(apiKey);
-    const effectiveGoogleApiKey = useGrsai
-      ? resolveGrsaiApiKey(googleApiKey)
-      : resolveGeminiApiKey(googleApiKey);
+    const effectiveGoogleApiKey = useOpenAiImage
+      ? resolveOpenAiImageApiKey(googleApiKey)
+      : useGrsai
+        ? resolveGrsaiApiKey(googleApiKey)
+        : resolveGeminiApiKey(googleApiKey);
 
-    if ((useGemini || useGrsai) && !effectiveGoogleApiKey) {
-      return res.status(400).json({ code: "MissingGoogleApiKey", message: "请先填写 Google API Key。" });
+    if ((useGemini || useGrsai || useOpenAiImage) && !effectiveGoogleApiKey) {
+      return res.status(400).json({ code: "MissingGoogleApiKey", message: "请先填写生图 API Key。" });
     }
-    if (!useGemini && !useGrsai && !effectiveApiKey) {
+    if (!useGemini && !useGrsai && !useOpenAiImage && !effectiveApiKey) {
       return res.status(400).json({ code: "MissingApiKey", message: "请先填写 DashScope / Qwen API Key。" });
     }
 
@@ -2243,7 +2251,35 @@ function getAiProcessingModeLabel(value) {
       let responsePayload = null;
       let images = [];
 
-      if (useGemini) {
+      if (useOpenAiImage) {
+        const content = [{ text: finalPrompt }];
+        if (parsedCanvasImage) {
+          content.push({ image: String(canvasImage || "").trim() });
+        }
+        const openAiPayload = {
+          model: selectedImageModel,
+          input: {
+            messages: [
+              {
+                role: "user",
+                content,
+              },
+            ],
+          },
+          parameters: {
+            size: size || "2K",
+            n: 1,
+          },
+        };
+        responsePayload = await requestOpenAiImageGenerate({
+          apiKey: effectiveGoogleApiKey,
+          payload: openAiPayload,
+          slideAspect,
+        });
+        images = (responsePayload.output?.choices?.[0]?.message?.content || [])
+          .filter((item) => item.type === "image" && item.image)
+          .map((item) => item.image);
+      } else if (useGemini) {
         const userParts = [{ text: finalPrompt }];
         if (parsedCanvasImage) {
           userParts.push({
@@ -2478,7 +2514,7 @@ function getAiProcessingModeLabel(value) {
     const effectiveGoogleApiKey = resolveGeminiApiKey(googleApiKey);
 
     if (!effectiveGoogleApiKey) {
-      return res.status(400).json({ code: "MissingGoogleApiKey", message: "请先填写 Google API Key。" });
+      return res.status(400).json({ code: "MissingGoogleApiKey", message: "请先填写生图 API Key。" });
     }
 
     try {

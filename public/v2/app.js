@@ -11,6 +11,9 @@ const GRSAI_WORKFLOW_MODELS = new Set([
   "nano-banana-pro",
   "gemini-3.1-pro",
 ]);
+const OPENAI_WORKFLOW_MODELS = new Set([
+  "gpt-image-2",
+]);
 const EDIT_MODEL = "wan2.7-image-pro";
 const MAX_REVISE_BOXES = 2;
 
@@ -720,7 +723,7 @@ function usingGeminiWorkflowModel() {
 
 function usingHostedWorkflowModel() {
   const model = getCurrentWorkflowImageModel();
-  return GEMINI_WORKFLOW_MODELS.has(model) || GRSAI_WORKFLOW_MODELS.has(model);
+  return GEMINI_WORKFLOW_MODELS.has(model) || GRSAI_WORKFLOW_MODELS.has(model) || OPENAI_WORKFLOW_MODELS.has(model);
 }
 
 function hasDashScopeApiKey() {
@@ -738,6 +741,7 @@ function syncWorkflowModelOptions() {
     `<option value="nano-banana-2">Grsai Nano Banana 2</option>`,
     `<option value="nano-banana-pro">Grsai Nano Banana Pro</option>`,
     `<option value="gemini-3.1-pro">Grsai Gemini 3.1 Pro</option>`,
+    `<option value="gpt-image-2">OpenAI GPT Image 2</option>`,
     `<option value="gemini-3.1-flash-image-preview">Nano Banana 2</option>`,
     `<option value="gemini-3-pro-image-preview">Nano Banana Pro</option>`,
     `<option value="gemini-2.5-flash-image">Nano Banana</option>`,
@@ -2530,7 +2534,7 @@ async function batchGenerateReadyPages() {
   await ensureServerConfigReady();
   const selectedImageModel = getCurrentWorkflowImageModel();
   if (usingHostedWorkflowModel() && !hasHostedImageApiKey()) {
-    setStatus("请先填写 Nano Banana / Gemini API Key。", "error");
+    setStatus("请先填写生图 API Key。", "error");
     switchTab("settings");
     return;
   }
@@ -2615,7 +2619,7 @@ async function testApiKeys() {
   try {
     const tasks = [];
     const selectedWorkflowModel = getCurrentWorkflowImageModel();
-    if (hasHostedImageApiKey() && (GEMINI_WORKFLOW_MODELS.has(selectedWorkflowModel) || GRSAI_WORKFLOW_MODELS.has(selectedWorkflowModel))) {
+    if (hasHostedImageApiKey() && usingHostedWorkflowModel()) {
       tasks.push(fetch("/api/test-image-key", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -3096,7 +3100,7 @@ async function generateCurrentPage() {
   await ensureServerConfigReady();
   const selectedImageModel = getCurrentWorkflowImageModel();
   if (usingHostedWorkflowModel() && !hasHostedImageApiKey()) {
-    setStatus("\u8bf7\u5148\u586b\u5199 Nano Banana / Gemini API Key\u3002", "error");
+    setStatus("请先填写生图 API Key。", "error");
     switchTab("settings");
     return;
   }

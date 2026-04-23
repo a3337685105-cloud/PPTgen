@@ -47,6 +47,9 @@ const GRSAI_IMAGE_MODELS = new Set([
   "nano-banana-pro",
   "gemini-3.1-pro",
 ]);
+const OPENAI_IMAGE_MODELS = new Set([
+  "gpt-image-2",
+]);
 const SUPPORTED_GEMINI_ASPECTS = new Set(["1:1", "4:3", "16:9", "3:4", "9:16"]);
 
 fs.mkdirSync(GENERATED_DIR, { recursive: true });
@@ -89,7 +92,7 @@ function resolveDashScopeApiKey(apiKey) {
 }
 
 function resolveHostedImageApiKey(apiKey) {
-  return String(apiKey || process.env.GRSAI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+  return String(apiKey || process.env.OPENAI_IMAGE_API_KEY || process.env.OPENAI_API_KEY || process.env.GRSAI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
 }
 
 function resolveGrsaiApiKey(apiKey) {
@@ -100,6 +103,10 @@ function resolveGeminiApiKey(apiKey) {
   return String(apiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
 }
 
+function resolveOpenAiImageApiKey(apiKey) {
+  return String(apiKey || process.env.OPENAI_IMAGE_API_KEY || process.env.OPENAI_API_KEY || "").trim();
+}
+
 function isGeminiImageModel(model) {
   return GEMINI_IMAGE_MODELS.has(String(model || "").trim());
 }
@@ -108,14 +115,22 @@ function isGrsaiImageModel(model) {
   return GRSAI_IMAGE_MODELS.has(String(model || "").trim());
 }
 
+function isOpenAiImageModel(model) {
+  return OPENAI_IMAGE_MODELS.has(String(model || "").trim());
+}
+
 function isHostedImageModel(model) {
-  return isGeminiImageModel(model) || isGrsaiImageModel(model);
+  return isGeminiImageModel(model) || isGrsaiImageModel(model) || isOpenAiImageModel(model);
 }
 
 function resolveGrsaiHost(host) {
   const value = String(host || process.env.GRSAI_HOST || "domestic").trim();
   if (/^https?:\/\//i.test(value)) return value.replace(/\/+$/, "");
   return (GRSAI_HOSTS[value] || GRSAI_HOSTS.domestic).replace(/\/+$/, "");
+}
+
+function resolveOpenAiImageBaseUrl() {
+  return String(process.env.OPENAI_IMAGE_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com").trim().replace(/\/+$/, "");
 }
 
 function extensionToMimeType(extension) {
@@ -167,6 +182,31 @@ function normalizeGeminiImageSize(size) {
   if (maxEdge <= 1536) return "1K";
   if (maxEdge <= 3072) return "2K";
   return "4K";
+}
+
+function normalizeOpenAiImageSize(size, slideAspect) {
+  const raw = String(size || "").trim().toLowerCase().replace("*", "x");
+  if (raw === "auto") return "auto";
+  if (/^\d+x\d+$/.test(raw)) return raw;
+
+  const quality = String(size || "").trim().toUpperCase();
+  const aspect = String(slideAspect || "").trim();
+  if (aspect === "1:1") {
+    return quality === "4K" ? "2048x2048" : "1024x1024";
+  }
+  if (aspect === "4:3") {
+    if (quality === "4K") return "2048x1536";
+    if (quality === "1K") return "1024x768";
+    return "1536x1152";
+  }
+  if (aspect === "9:16") {
+    if (quality === "4K") return "2160x3840";
+    if (quality === "1K") return "864x1536";
+    return "1024x1536";
+  }
+  if (quality === "4K") return "3840x2160";
+  if (quality === "1K") return "1536x864";
+  return "2048x1152";
 }
 
 function parseDataUrl(dataUrl) {
@@ -398,6 +438,10 @@ function buildGrsaiResultUrl(host) {
   return `${resolveGrsaiHost(host)}/v1/draw/result`;
 }
 
+function buildOpenAiImageGenerationsUrl() {
+  return `${resolveOpenAiImageBaseUrl()}/v1/images/generations`;
+}
+
 async function requestJsonViaFetch({ url, method = "POST", headers = {}, body }) {
   const response = await fetch(url, {
     method,
@@ -409,6 +453,84 @@ async function requestJsonViaFetch({ url, method = "POST", headers = {}, body })
 
 async function requestGeminiJson(request) {
   return requestJsonViaFetch(request);
+}
+
+function buildOpenAiImageGenerationBody({ payload, slideAspect }) {
+  const extracted = extractPromptAndImagesFromPayload(payload);
+  if (!extracted.prompt) {
+    const error = new Error("OpenAI 图片请求缺少提示词。");
+    error.status = 400;
+    throw error;
+  }
+  return {
+    model: String(payload?.model || "gpt-image-2").trim() || "gpt-image-2",
+    prompt: extracted.prompt,
+    size: normalizeOpenAiImageSize(payload?.parameters?.size, slideAspect),
+    response_format: "b64_json",
+    ...(extracted.urls.length ? { image: extracted.urls } : {}),
+  };
+}
+
+async function normalizeOpenAiImageGenerationResponse(data, model) {
+  const requestId = String(data?.id || data?.request_id || crypto.randomUUID()).trim();
+  const content = [];
+  const items = Array.isArray(data?.data) ? data.data : [];
+
+  let imageIndex = 0;
+  for (const item of items) {
+    if (typeof item?.revised_prompt === "string" && item.revised_prompt.trim()) {
+      content.push({ type: "text", text: item.revised_prompt.trim() });
+    }
+    if (typeof item?.b64_json === "string" && item.b64_json.trim()) {
+      imageIndex += 1;
+      const saved = await saveGeneratedBufferToFile(Buffer.from(item.b64_json, "base64"), {
+        prefix: "gpt_image_2",
+        requestId,
+        index: imageIndex,
+        extension: ".png",
+      });
+      content.push({ type: "image", image: saved.localUrl });
+    } else if (typeof item?.url === "string" && item.url.trim()) {
+      content.push({ type: "image", image: item.url.trim() });
+    }
+  }
+
+  return {
+    request_id: requestId,
+    provider: "openai-image",
+    model,
+    usage: data?.usage || null,
+    output: {
+      choices: [
+        {
+          message: {
+            content,
+          },
+        },
+      ],
+    },
+    raw: data,
+  };
+}
+
+async function requestOpenAiImageGenerate({ apiKey, payload, slideAspect }) {
+  const body = buildOpenAiImageGenerationBody({ payload, slideAspect });
+  const parsed = await requestJsonViaFetch({
+    method: "POST",
+    url: buildOpenAiImageGenerationsUrl(),
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!parsed.ok) {
+    const error = new Error(parsed.data?.error?.message || parsed.data?.message || "OpenAI 图片生成请求失败。");
+    error.status = parsed.status || 500;
+    error.details = parsed.data;
+    throw error;
+  }
+  return normalizeOpenAiImageGenerationResponse(parsed.data, body.model);
 }
 
 async function normalizeGeminiGenerateResponse(data, model) {
@@ -1242,9 +1364,11 @@ installWorkflowRoutes(app, {
   resolveHostedImageApiKey,
   resolveGrsaiApiKey,
   resolveGeminiApiKey,
+  resolveOpenAiImageApiKey,
   parseJsonResponse,
   requestGeminiJson,
   requestGrsaiGenerate,
+  requestOpenAiImageGenerate,
   normalizeGeminiGenerateResponse,
   buildGeminiModelUrl,
   buildGrsaiModelUrl,
@@ -1266,13 +1390,23 @@ app.post("/api/test-image-key", async (req, res) => {
   }
 
   if (isHostedImageModel(model)) {
-    const effectiveGoogleApiKey = isGrsaiImageModel(model)
-      ? resolveGrsaiApiKey(googleApiKey)
-      : resolveGeminiApiKey(googleApiKey);
+    const effectiveGoogleApiKey = isOpenAiImageModel(model)
+      ? resolveOpenAiImageApiKey(googleApiKey)
+      : isGrsaiImageModel(model)
+        ? resolveGrsaiApiKey(googleApiKey)
+        : resolveGeminiApiKey(googleApiKey);
     if (!effectiveGoogleApiKey) {
       return res.status(400).json({
         code: "MissingGoogleApiKey",
-        message: "请先填写 Nano Banana / Gemini API Key。",
+        message: "请先填写生图 API Key。",
+      });
+    }
+
+    if (isOpenAiImageModel(model)) {
+      return res.json({
+        ok: true,
+        provider: "openai-image",
+        message: `OpenAI 图片接口 Key 已填写，模型 ${model} 将使用 ${resolveOpenAiImageBaseUrl()}。`,
       });
     }
 
@@ -1384,18 +1518,29 @@ app.post("/api/generate", async (req, res, next) => {
     return next();
   }
 
-  const effectiveGoogleApiKey = isGrsaiImageModel(payload.model)
-    ? resolveGrsaiApiKey(googleApiKey)
-    : resolveGeminiApiKey(googleApiKey);
+  const effectiveGoogleApiKey = isOpenAiImageModel(payload.model)
+    ? resolveOpenAiImageApiKey(googleApiKey)
+    : isGrsaiImageModel(payload.model)
+      ? resolveGrsaiApiKey(googleApiKey)
+      : resolveGeminiApiKey(googleApiKey);
 
   if (!effectiveGoogleApiKey) {
     return res.status(400).json({
       code: "MissingGoogleApiKey",
-      message: "请先填写 Nano Banana / Gemini API Key，再调用生图模型。",
+      message: "请先填写生图 API Key，再调用生图模型。",
     });
   }
 
   try {
+    if (isOpenAiImageModel(payload.model)) {
+      const normalized = await requestOpenAiImageGenerate({
+        apiKey: effectiveGoogleApiKey,
+        payload,
+        slideAspect,
+      });
+      return res.json(normalized);
+    }
+
     if (isGrsaiImageModel(payload.model)) {
       const normalized = await requestGrsaiGenerate({
         apiKey: effectiveGoogleApiKey,
