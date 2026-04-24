@@ -1,3 +1,5 @@
+> **Note:** This is a historical planning document from 2026-04. Many items described here (e.g., intent-to-draft, single-call prepare, final prompt slimming) have since been implemented or evolved. See the current codebase and README for the up-to-date feature set.
+
 # Plan: 精简 PPT 工作流与短链路优化
 
 ## Context

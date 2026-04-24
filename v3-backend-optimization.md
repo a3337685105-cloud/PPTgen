@@ -1,3 +1,5 @@
+> **Note:** This is a historical planning document from 2026-04. The project remains on v2; the optimizations described here (concurrency, label renames, CPU profiling) have since been implemented or superseded by later changes. See the current codebase for the up-to-date implementation.
+
 # PPT Studio v3 后端优化计划 (Backend Optimization Plan)
 
 ## 1. 目标与背景
