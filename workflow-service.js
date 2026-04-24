@@ -1196,6 +1196,8 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
     page.contentBand = normalizeContentBand(page.contentBand || page.recommendedBand, cleanOnscreenContent);
     page.layoutMapping = deriveLayoutMapping(page, cleanOnscreenContent);
     page.layoutInstruction = page.layoutMapping.instruction;
+    page.jitDecoration = null;
+    page.pageTypePromptModule = null;
     page.overflowFlag = charCount > 250;
     page.overflowReason = page.overflowFlag
       ? `当前页内容约 ${charCount} 字（按中英数字加权估算），建议关注页面密度。`
@@ -1624,6 +1626,22 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
     preparePageForGeneration(job, page, "local-reprepare");
   }
 
+  async function precomputePagePromptModule(apiKey, region, job, page, source = "prepare") {
+    if (!page?.prepareDone) return null;
+    if (!page.promptTrace || typeof page.promptTrace !== "object") page.promptTrace = {};
+    page.jitDecoration = await runJitDecorationExtraction(apiKey, region || DEFAULT_REGION, job, page);
+    page.promptTrace.jitDecoration = page.jitDecoration.trace || {
+      source: page.jitDecoration.source,
+      keywords: page.jitDecoration.keywords,
+      visualElementBrief: page.jitDecoration.visualElementBrief || "",
+      decorationPrompt: page.jitDecoration.decorationPrompt,
+      error: page.jitDecoration.error || "",
+      precomputeSource: source,
+    };
+    attachPageTypePromptModule(job, page);
+    return page.pageTypePromptModule;
+  }
+
   function deriveLayoutMapping(page, cleanOnscreenContent = "") {
     const pageType = String(page?.pageType || "content").toLowerCase();
     const wordCount = Number(page?.estimatedChars || page?.word_count || countCharacters(cleanOnscreenContent));
@@ -1684,6 +1702,7 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
       targetChars = 0,
       maxChars = 0,
       referenceDigest = null,
+      precomputePromptModules = true,
     } = options;
 
     for (const page of job.pages) {
@@ -1693,6 +1712,9 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
       job.updatedAt = new Date().toISOString();
       try {
         preparePageForGeneration(job, page, "local-batch");
+        if (precomputePromptModules) {
+          await precomputePagePromptModule(apiKey, region, job, page, "split-prepare");
+        }
       } catch (error) {
         page.prepareDone = true;
         page.readyToGenerate = true;
@@ -2039,6 +2061,84 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
     }
   });
 
+  app.post("/api/workflow/manual-job", async (req, res) => {
+    const { themeDefinition, preferences, decorationLevel, imageModel } = req.body || {};
+    try {
+      const normalizedPreferences = normalizePreferences(preferences);
+      const normalizedThemeDefinition = normalizeThemeBasicDefinition(
+        themeDefinition || {},
+        themeDefinition?.themeName || "",
+        decorationLevel,
+        normalizedPreferences,
+      );
+      const job = createWorkflowJob({
+        documentSummary: "手工项目。",
+        splitDiagnostics: "跳过拆分，由用户手动添加页面。",
+        referenceDigest: null,
+        themeDefinition: normalizedThemeDefinition,
+        preferences: normalizedPreferences,
+        splitPreset: "",
+        aiProcessingMode: "manual",
+        pages: [],
+        themeTrace: null,
+        referenceTrace: null,
+        splitTrace: null,
+        expansionTrace: {
+          mode: "manual",
+          enableExpansion: false,
+          targetChars: 0,
+          maxChars: 0,
+        },
+      });
+      job.status = "ready";
+      job.statusText = "手工项目已创建，请添加页面。";
+      refreshJobProgress(job);
+      return res.json({
+        ok: true,
+        jobId: job.id,
+        job: publicJobSnapshot(job),
+      });
+    } catch (error) {
+      return res.status(500).json({
+        code: "WorkflowManualJobFailed",
+        message: error.message || "创建手工项目失败。",
+      });
+    }
+  });
+
+  app.post("/api/workflow/manual-page", async (req, res) => {
+    const { jobId, pageTitle, pageContent, pageType } = req.body || {};
+    try {
+      const job = getWorkflowJobOrThrow(jobId);
+      const nextPageNumber = job.pages.length + 1;
+      const rawPage = {
+        id: crypto.randomUUID(),
+        pageNumber: nextPageNumber,
+        pageTitle: String(pageTitle || "").trim() || `第 ${nextPageNumber} 页`,
+        pageContent: String(pageContent || "").trim(),
+        pageType: ["cover", "catalog", "chapter", "content", "data"].includes(pageType) ? pageType : "content",
+        onscreenContent: String(pageContent || "").trim(),
+        onscreenContentText: String(pageContent || "").trim(),
+        recommendedBand: "balanced",
+        splitRisk: "none",
+      };
+      const page = createWorkflowPage(rawPage);
+      preparePageForGeneration(job, page, "manual");
+      job.pages.push(page);
+      refreshJobProgress(job);
+      return res.json({
+        ok: true,
+        job: publicJobSnapshot(job),
+        page,
+      });
+    } catch (error) {
+      return res.status(error.status || 500).json({
+        code: "WorkflowManualPageFailed",
+        message: error.message || "添加页面失败。",
+      });
+    }
+  });
+
   app.post("/api/workflow/split", async (req, res) => {
     const {
       apiKey,
@@ -2054,6 +2154,7 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
       themeDefinition,
       preferences,
       decorationLevel,
+      imageModel,
     } = req.body || {};
 
     const effectiveApiKey = resolveDashScopeApiKey(apiKey);
@@ -2084,6 +2185,7 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
       const normalizedEnableExpansion = Boolean(enableExpansion);
       const normalizedTargetChars = Math.max(0, Number(targetChars) || 0);
       const normalizedMaxChars = Math.max(0, Number(maxChars) || 0);
+      const precomputePromptModules = !OPENAI_WORKFLOW_IMAGE_MODELS.has(String(imageModel || "").trim());
 
       if (!splitResult.pages.length) {
         return res.status(502).json({
@@ -2121,6 +2223,7 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
           targetChars: normalizedTargetChars,
           maxChars: normalizedMaxChars,
           referenceDigest: null,
+          precomputePromptModules,
         }).catch((error) => {
           job.status = "error";
           job.statusText = error.message || "逐页准备失败。";
@@ -2217,6 +2320,7 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
       }
 
       preparePageForGeneration(job, page, "user-edit");
+      await precomputePagePromptModule(effectiveApiKey, region || DEFAULT_REGION, job, page, "user-edit");
       refreshJobProgress(job);
       return res.json({
         ok: true,
@@ -2298,15 +2402,9 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
         };
       } else {
         const basicPrompt = getConfirmedThemeBasicOrThrow(job);
-        page.jitDecoration = await runJitDecorationExtraction(effectiveApiKey, region || DEFAULT_REGION, job, page);
-        page.promptTrace.jitDecoration = page.jitDecoration.trace || {
-          source: page.jitDecoration.source,
-          keywords: page.jitDecoration.keywords,
-          visualElementBrief: page.jitDecoration.visualElementBrief || "",
-          decorationPrompt: page.jitDecoration.decorationPrompt,
-          error: page.jitDecoration.error || "",
-        };
-        attachPageTypePromptModule(job, page);
+        if (!page.jitDecoration || !page.pageTypePromptModule) {
+          await precomputePagePromptModule(effectiveApiKey, region || DEFAULT_REGION, job, page, "generate-fallback");
+        }
         finalPrompt = buildFinalImagePrompt(job, page, String(extraPrompt || "").trim());
         finalPromptTrace = {
           promptMode: "standard",
@@ -2575,15 +2673,9 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
         };
       } else {
         const basicPrompt = getConfirmedThemeBasicOrThrow(job);
-        page.jitDecoration = await runJitDecorationExtraction(effectiveApiKey, region || DEFAULT_REGION, job, page);
-        page.promptTrace.jitDecoration = page.jitDecoration.trace || {
-          source: page.jitDecoration.source,
-          keywords: page.jitDecoration.keywords,
-          visualElementBrief: page.jitDecoration.visualElementBrief || "",
-          decorationPrompt: page.jitDecoration.decorationPrompt,
-          error: page.jitDecoration.error || "",
-        };
-        attachPageTypePromptModule(job, page);
+        if (!page.jitDecoration || !page.pageTypePromptModule) {
+          await precomputePagePromptModule(effectiveApiKey, region || DEFAULT_REGION, job, page, "prompt-copy-fallback");
+        }
         finalPrompt = buildFinalImagePrompt(job, page, String(extraPrompt || "").trim());
         finalPromptTrace = {
           promptMode: "standard",
@@ -2641,15 +2733,9 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
       const page = getWorkflowPageOrThrow(job, pageId);
       page.generationStatus = "preparing";
       page.generationError = "";
-      page.jitDecoration = await runJitDecorationExtraction("", DEFAULT_REGION, job, page);
-      page.promptTrace.jitDecoration = page.jitDecoration.trace || {
-        source: page.jitDecoration.source,
-        keywords: page.jitDecoration.keywords,
-        visualElementBrief: page.jitDecoration.visualElementBrief || "",
-        decorationPrompt: page.jitDecoration.decorationPrompt,
-        error: page.jitDecoration.error || "",
-      };
-      attachPageTypePromptModule(job, page);
+      if (!page.jitDecoration || !page.pageTypePromptModule) {
+        await precomputePagePromptModule("", DEFAULT_REGION, job, page, "legacy-generate-fallback");
+      }
       const finalPrompt = buildFinalImagePrompt(job, page, String(extraPrompt || "").trim());
       page.generationStatus = "running";
       page.promptTrace.finalImage = {

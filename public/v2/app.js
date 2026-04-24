@@ -29,23 +29,23 @@ const DEFAULT_PREFERENCES = {
 };
 
 const PREFERENCE_LABELS = {
-  styleMode: { business: "商务汇报感", academic: "学术研究感", creative: "创意表达感" },
-  layoutVariety: { uniform: "版式统一稳态", balanced: "版式适度变化", diverse: "版式变化明显" },
-  detailLevel: { minimal: "装饰极简克制", polished: "装饰精致均衡", rich: "装饰细节丰富" },
-  visualDensity: { airy: "留白更充足", balanced: "疏密更均衡", dense: "信息更饱满" },
+  styleMode: { business: "商务清晰", academic: "科研克制", creative: "创意表达" },
+  layoutVariety: { uniform: "整体统一", balanced: "稳中有变", diverse: "变化明显" },
+  detailLevel: { minimal: "极简克制", polished: "精致均衡", rich: "细节丰富" },
+  visualDensity: { airy: "留白充足", balanced: "疏密均衡", dense: "信息偏满" },
   compositionFocus: { imageLead: "视觉主导", balanced: "图文均衡", textLead: "文字主导" },
-  dataNarrative: { clean: "数据清晰直给", balanced: "图表适度增强", expressive: "数据冲击更强" },
-  pageMood: { steady: "稳重专业", modern: "现代清晰", dramatic: "冲击更强" },
+  dataNarrative: { clean: "清晰直给", balanced: "适度增强", expressive: "冲击更强" },
+  pageMood: { steady: "稳重专业", modern: "现代清晰", dramatic: "强烈冲击" },
 };
 
 const PREFERENCE_PROMPT_KEYS = {
-  styleMode: "风格基调",
-  layoutVariety: "版式变化",
-  detailLevel: "装饰细节",
-  visualDensity: "画面疏密",
-  compositionFocus: "图文重心",
+  styleMode: "画面气质",
+  layoutVariety: "版式节奏",
+  detailLevel: "视觉细节",
+  visualDensity: "信息密度",
+  compositionFocus: "图文关系",
   dataNarrative: "数据表现",
-  pageMood: "整体气质",
+  pageMood: "整体张力",
 };
 
 const AI_PROCESSING_MODE_LABELS = {
@@ -235,6 +235,7 @@ function cacheElements() {
     "referenceFilesInput",
     "referenceFilesList",
     "runSplitBtn",
+    "skipSplitBtn",
     "cancelSplitBtn",
     "backToThemeBtn",
     "backToSplitBtn",
@@ -244,6 +245,7 @@ function cacheElements() {
     "workflowPromptTrace",
     "workflowRibbonMeta",
     "workflowPageList",
+    "addManualPageBtn",
     "pageMetaHint",
     "pageOnscreenPreview",
     "pageOnscreenEditor",
@@ -648,7 +650,7 @@ function syncSplitExpansionControls() {
   state.workflowEnableExpansion = enabled;
   if (el.workflowTargetChars) {
     el.workflowTargetChars.disabled = !enabled;
-    el.workflowTargetChars.placeholder = enabled ? "例如 180" : "选择“拆分并扩写”后启用";
+    el.workflowTargetChars.placeholder = enabled ? "例如 180" : "拆分并扩写时启用";
     el.workflowTargetChars.closest(".field")?.classList.toggle("is-disabled", !enabled);
   }
 }
@@ -701,7 +703,7 @@ function ensureStandardWorkflowThemeReady(message = "请先生成并确认风格
 function renderPreferenceSummary() {
   const current = getCurrentPreferences();
   state.preferences = current;
-  el.preferenceSummary.textContent = `问卷风格锚点：${getPreferencePromptPairs(current).join("；")}`;
+  el.preferenceSummary.textContent = `当前风格锚点：${getPreferencePromptPairs(current).join("；")}`;
 }
 
 function getPageTypeMeta(type) {
@@ -875,6 +877,7 @@ function syncWorkflowModelOptions() {
     }
   });
   state.settings.workflowImageModel = normalizedValue;
+  syncWorkflowModelCards();
 }
 
 function setWorkflowImageModel(value) {
@@ -882,12 +885,20 @@ function setWorkflowImageModel(value) {
   getWorkflowModelSelects().forEach((select) => {
     select.value = state.settings.workflowImageModel;
   });
+  syncWorkflowModelCards();
   syncGeminiSearchControls();
   if (document.querySelector(".ribbon-step")) {
     switchSmartStep(state.smartStep || "model", { silent: true });
     return;
   }
   syncWorkflowModeUi();
+}
+
+function syncWorkflowModelCards() {
+  const current = getCurrentWorkflowImageModel();
+  document.querySelectorAll("[data-model-card]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.modelCard === current);
+  });
 }
 
 function syncWorkflowModeUi() {
@@ -906,8 +917,8 @@ function syncWorkflowModeUi() {
   });
   if (el.workflowModelHint) {
     el.workflowModelHint.textContent = isGpt
-      ? "GPT Image 2 使用轻链路：拆分内容后逐页填写风格并直接生图。"
-      : "当前模型使用完整链路：拆分内容后匹配全局风格，再逐页确认并生成。";
+      ? "GPT Image 2 轻链路：拆分内容后，逐页填写风格提示词并直接生图。"
+      : "标准链路：拆分内容后匹配基础风格，再逐页确认内容并生成。";
   }
   if (state.smartStep === "theme" && isGpt) {
     state.smartStep = state.workflowJob ? "pages" : "split";
@@ -1407,13 +1418,6 @@ function renderHistoryProjects() {
   if (el.restoreHistoryProjectBtn) {
     el.restoreHistoryProjectBtn.disabled = !snapshot;
   }
-}
-
-function getNextWorkflowPage(currentPageId) {
-  const pages = Array.isArray(state.workflowJob?.pages) ? state.workflowJob.pages : [];
-  const currentIndex = pages.findIndex((page) => page.id === currentPageId);
-  if (currentIndex < 0) return null;
-  return pages[currentIndex + 1] || null;
 }
 
 function openCurrentPageLargeImage() {
@@ -2362,6 +2366,12 @@ function bindEvents() {
   document.querySelectorAll(".sidebar-tab").forEach((button) => {
     button.addEventListener("click", () => switchTab(button.dataset.tab));
   });
+  document.querySelectorAll("[data-model-card]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setWorkflowImageModel(button.dataset.modelCard || PPT_MODEL);
+      saveState();
+    });
+  });
   document.querySelectorAll(".ribbon-step").forEach((button) => {
     button.addEventListener("click", () => {
       const next = button.dataset.step;
@@ -2403,6 +2413,7 @@ function bindEvents() {
   el.pickReferenceFilesBtn.addEventListener("click", () => el.referenceFilesInput.click());
   el.referenceFilesInput.addEventListener("change", handleReferenceFiles);
   el.runSplitBtn.addEventListener("click", runSplit);
+  el.skipSplitBtn?.addEventListener("click", skipSplit);
   el.cancelSplitBtn.addEventListener("click", () => cancelAction("split"));
   el.workflowContent.addEventListener("input", () => {
     state.workflowContent = el.workflowContent.value;
@@ -2453,8 +2464,9 @@ function bindEvents() {
   el.repreparePageBtn.addEventListener("click", reprepareCurrentPage);
   el.aiRepolishPageBtn.addEventListener("click", aiRepolishCurrentPage);
   el.cancelRepreparePageBtn.addEventListener("click", () => cancelAction("repolish") || cancelAction("reprepare"));
-  el.batchGenerateReadyBtn.addEventListener("click", batchGenerateReadyPages);
-  el.cancelBatchGenerateBtn.addEventListener("click", () => cancelAction("batchGenerate"));
+  el.batchGenerateReadyBtn?.addEventListener("click", batchGenerateReadyPages);
+  el.cancelBatchGenerateBtn?.addEventListener("click", () => cancelAction("batchGenerate"));
+  el.addManualPageBtn?.addEventListener("click", addManualPage);
   el.uploadOverlayBtn.addEventListener("click", () => el.overlayFileInput.click());
   el.overlayFileInput.addEventListener("change", handleOverlayFiles);
   el.clearOverlayBtn.addEventListener("click", clearCurrentOverlays);
@@ -2591,7 +2603,7 @@ function renderPageResults() {
     : page.generationStatus === "error"
       ? (page.generationError || "最近一次生成失败。")
       : historyImages.length
-        ? `已保存 ${historyImages.length} 个历史版本`
+        ? `${historyImages.length} 个版本`
         : "还没有历史生图版本。";
 
   el.pageResultStrip.innerHTML = `
@@ -2610,7 +2622,7 @@ function renderPageResults() {
             title="${escapeHtml(`第 ${index + 1} 个版本`)}"
           >
             <img src="${escapeHtml(src)}" alt="${escapeHtml(page.pageTitle || `第${page.pageNumber}页`)}" />
-            <span>版本 ${index + 1}</span>
+            <span>${index + 1}</span>
           </button>
         `).join("")}
       </div>
@@ -2646,6 +2658,91 @@ function formatOnscreenPreview(value) {
     .filter(Boolean);
 
   return lines.filter((line, index) => line !== lines[index - 1]).join("\n");
+}
+
+async function skipSplit() {
+  clearWorkflowSession();
+  const signal = startCancelableAction("split", el.skipSplitBtn, el.cancelSplitBtn, "创建中...");
+  state.workflowJob = {
+    id: "",
+    status: "running",
+    totalPages: 0,
+    preparedPages: 0,
+    readyToGeneratePages: 0,
+    failedPages: 0,
+    pages: [],
+    statusText: "正在创建手工项目...",
+  };
+  state.selectedPageId = "";
+  renderPagesWorkbench();
+  setStatus("正在创建手工项目...", "running");
+  try {
+    const data = await apiJson("/api/workflow/manual-job", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal,
+      body: JSON.stringify({
+        themeDefinition: state.themeDefinition,
+        preferences: state.preferences,
+        decorationLevel: state.decorationLevel,
+        imageModel: getCurrentWorkflowImageModel(),
+      }),
+    });
+    state.workflowJobId = data.jobId;
+    state.workflowJob = sanitizeRecoveredWorkflowJob(data.job);
+    state.selectedPageId = "";
+    ensureSelectedPage();
+    state.themeConfirmed = usingGptSimpleWorkflow();
+    switchSmartStep(usingGptSimpleWorkflow() ? "pages" : "theme");
+    setStatus(
+      usingGptSimpleWorkflow()
+        ? "已进入手工模式，点击 + 添加页面并逐页生成。"
+        : "已进入手工模式，下一步根据页面结构匹配风格。",
+      "success",
+    );
+    saveState();
+  } catch (error) {
+    if (isAbortError(error)) {
+      clearWorkflowSession({ toSplit: true });
+      return;
+    }
+    clearWorkflowSession({ toSplit: true });
+    setStatus(error.message || "创建手工项目失败。", "error");
+  } finally {
+    finishCancelableAction("split");
+  }
+}
+
+async function addManualPage() {
+  if (!state.workflowJobId) {
+    setStatus("请先创建项目。", "error");
+    return;
+  }
+  const signal = startCancelableAction("addPage", el.addManualPageBtn, null, "添加中...");
+  try {
+    const data = await apiJson("/api/workflow/manual-page", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal,
+      body: JSON.stringify({
+        jobId: state.workflowJobId,
+        pageTitle: "新页面",
+        pageContent: "",
+        pageType: "content",
+      }),
+    });
+    state.workflowJob = sanitizeRecoveredWorkflowJob(data.job);
+    state.selectedPageId = data.page?.id || "";
+    ensureSelectedPage();
+    renderPagesWorkbench();
+    setStatus("已添加新页面，请填写标题和内容。", "success");
+    saveState();
+  } catch (error) {
+    if (isAbortError(error)) return;
+    setStatus(error.message || "添加页面失败。", "error");
+  } finally {
+    finishCancelableAction("addPage");
+  }
 }
 
 async function runSplit() {
@@ -2698,6 +2795,7 @@ async function runSplit() {
         pageCount: state.workflowPageCount,
         splitTemplate: "",
         aiProcessingMode: state.aiProcessingMode,
+        imageModel: getCurrentWorkflowImageModel(),
         enableExpansion: aiProcessingModeUsesExpansion(state.aiProcessingMode),
         targetChars: aiProcessingModeUsesExpansion(state.aiProcessingMode) ? state.workflowTargetChars : 0,
         maxChars: state.workflowMaxChars,
@@ -2775,17 +2873,17 @@ async function syncWorkflowJobOnce() {
 function renderPageList() {
   const job = state.workflowJob;
   if (!job?.pages?.length) {
-    el.workflowStats.textContent = "";
-    el.workflowDiagnostics.textContent = "";
-    el.workflowPromptTrace.textContent = "";
+    if (el.workflowStats) el.workflowStats.textContent = "";
+    if (el.workflowDiagnostics) el.workflowDiagnostics.textContent = "";
+    if (el.workflowPromptTrace) el.workflowPromptTrace.textContent = "";
     el.workflowPageList.innerHTML = "";
     return;
   }
   ensureSelectedPage();
   if (el.workflowSummary) el.workflowSummary.textContent = "";
-  el.workflowStats.textContent = formatJobStats(job);
-  el.workflowDiagnostics.textContent = normalizeDisplayText(job.splitDiagnostics);
-  el.workflowPromptTrace.textContent = stringifyTrace(job.promptTrace);
+  if (el.workflowStats) el.workflowStats.textContent = formatJobStats(job);
+  if (el.workflowDiagnostics) el.workflowDiagnostics.textContent = normalizeDisplayText(job.splitDiagnostics);
+  if (el.workflowPromptTrace) el.workflowPromptTrace.textContent = stringifyTrace(job.promptTrace);
   el.workflowPageList.innerHTML = job.pages.map((page) => {
     const typeMeta = getPageTypeMeta(page.pageType);
     const pageActive = isPageGenerating(page.id);
@@ -3461,7 +3559,7 @@ async function generateCurrentPage() {
   );
   try {
     const canvasImage = await exportCurrentArtboard();
-    const generatePromise = apiJson("/api/workflow/page/generate-v2", {
+    const data = await apiJson("/api/workflow/page/generate-v2", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       signal,
@@ -3486,13 +3584,6 @@ async function generateCurrentPage() {
         canvasImage,
       }),
     });
-    const nextPage = getNextWorkflowPage(currentPageId);
-    if (nextPage && state.selectedPageId === currentPageId) {
-      state.selectedPageId = nextPage.id;
-      renderPagesWorkbench();
-      saveState();
-    }
-    const data = await generatePromise;
     if (!data.page?.generated) {
       throw new Error(data.page?.generationError || "\u8fd9\u4e00\u9875\u6ca1\u6709\u62ff\u5230\u56fe\u7247\u7ed3\u679c\u3002");
     }
