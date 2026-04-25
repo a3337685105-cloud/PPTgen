@@ -1,4 +1,17 @@
 node_modules
 .npm-cache
+.env
+.env.local
 generated-images/*
 !generated-images/.gitkeep
+exports/*
+!exports/.gitkeep
+tmp/
+tmp-server*.log
+data/ppt-guide-extract/
+data/studio-library.json
+data/reference-assets/
+data/*.docx
+data/*.pptx
+data/*.pdf
+.claude/

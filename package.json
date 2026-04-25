@@ -1,16 +1,40 @@
 {
   "name": "nanobanana-ppt-studio",
   "version": "1.0.0",
-  "description": "Local PPT-focused image studio powered by Nano Banana and reusable PPT harness tooling.",
+  "description": "Local PPT workflow studio powered by Nano Banana, Gemini, GPT Image 2 and reusable PPT harness tooling.",
   "main": "server.js",
+  "bin": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "start:windows": "start-app.bat",
+    "clean:artifacts": "node scripts/clean-artifacts.js",
+    "clean:artifacts:all": "node scripts/clean-artifacts.js --all-generated",
+    "build:exe": "pkg . --out-path=dist"
+  },
+  "pkg": {
+    "scripts": [
+      "server.js",
+      "workflow-service.js",
+      "scripts/**/*.js"
+    ],
+    "assets": [
+      "public/**/*"
+    ],
+    "targets": [
+      "node18-win-x64"
+    ],
+    "outputPath": "dist"
   },
   "keywords": [
-    "gemini",
-    "nano-banana",
     "ppt",
     "image-generation",
+    "nano-banana",
+    "gemini",
+    "gpt-image",
+    "openai",
+    "grsai",
+    "qwen",
+    "dashscope",
     "web-ui"
   ],
   "license": "MIT",
@@ -19,6 +43,10 @@
     "jszip": "^3.10.1",
     "multer": "^2.1.1",
     "pdf-parse": "^2.4.5",
+    "pptxgenjs": "^4.0.1",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@yao-pkg/pkg": "^6.3.2"
   }
 }

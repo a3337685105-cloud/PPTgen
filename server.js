@@ -1,22 +1,39 @@
+﻿if (typeof DOMMatrix === "undefined") {
+  global.DOMMatrix = class DOMMatrix {};
+}
+if (typeof ImageData === "undefined") {
+  global.ImageData = class ImageData {};
+}
+if (typeof Path2D === "undefined") {
+  global.Path2D = class Path2D {};
+}
+
 const crypto = require("crypto");
 const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
-const { spawn } = require("child_process");
 const express = require("express");
 const multer = require("multer");
 const JSZip = require("jszip");
+const PptxGenJS = require("pptxgenjs");
 const XLSX = require("xlsx");
 const pdfParse = require("pdf-parse");
 const { installWorkflowRoutes } = require("./workflow-service");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+let ACTIVE_PORT = Number(PORT);
 const ROOT_DIR = __dirname;
 const PUBLIC_DIR = path.join(ROOT_DIR, "public");
-const GENERATED_DIR = path.join(ROOT_DIR, "generated-images");
-const DATA_DIR = path.join(ROOT_DIR, "data");
+const RUNTIME_DIR = process.pkg ? path.dirname(process.execPath) : __dirname;
+const GENERATED_DIR = path.join(RUNTIME_DIR, "generated-images");
+const EXPORTS_DIR = path.join(RUNTIME_DIR, "exports");
+const DATA_DIR = path.join(RUNTIME_DIR, "data");
+const REFERENCE_ASSETS_DIR = path.join(DATA_DIR, "reference-assets");
 const LIBRARY_DOC_PATH = path.join(DATA_DIR, "studio-library.json");
+
+loadLocalEnv();
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -28,22 +45,116 @@ const upload = multer({
 const REGION_MAP = {
   beijing: "https://dashscope.aliyuncs.com",
 };
-const GEMINI_IMAGE_MODELS = new Set(["gemini-3-pro-image-preview"]);
+const GRSAI_HOSTS = {
+  domestic: "https://grsai.dakka.com.cn",
+  overseas: "https://grsaiapi.com",
+};
+const OPENAI_IMAGE_DEFAULT_HOST = "https://api.bltcy.ai";
+const OPENAI_IMAGE_GENERATIONS_PATH = "/v1/images/generations";
+const GEMINI_IMAGE_MODELS = new Set([
+  "gemini-3.1-flash-image-preview",
+  "gemini-3-pro-image-preview",
+  "gemini-2.5-flash-image",
+]);
+const GRSAI_IMAGE_MODELS = new Set([
+  "nano-banana-2",
+  "nano-banana-pro",
+  "gemini-3.1-pro",
+]);
+const OPENAI_IMAGE_MODELS = new Set([
+  "gpt-image-2",
+]);
 const SUPPORTED_GEMINI_ASPECTS = new Set(["1:1", "4:3", "16:9", "3:4", "9:16"]);
 
 fs.mkdirSync(GENERATED_DIR, { recursive: true });
+fs.mkdirSync(EXPORTS_DIR, { recursive: true });
 fs.mkdirSync(DATA_DIR, { recursive: true });
+fs.mkdirSync(REFERENCE_ASSETS_DIR, { recursive: true });
 
 app.use(express.json({ limit: "50mb" }));
+app.get("/", (_req, res) => {
+  res.redirect(302, "/v2/index.html");
+});
 app.use(express.static(PUBLIC_DIR));
 app.use("/generated-images", express.static(GENERATED_DIR));
+app.use("/exports", express.static(EXPORTS_DIR));
+app.use("/reference-assets", express.static(REFERENCE_ASSETS_DIR));
 
 function resolveRegion(region) {
   return REGION_MAP[region] || REGION_MAP.beijing;
 }
 
+function loadLocalEnv() {
+  [".env.local", ".env"].forEach((fileName) => {
+    const filePath = path.join(RUNTIME_DIR, fileName);
+    if (!fs.existsSync(filePath)) return;
+    const content = fs.readFileSync(filePath, "utf8");
+    content.split(/\r?\n/).forEach((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) return;
+      const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+      if (!match) return;
+      const key = match[1];
+      if (Object.prototype.hasOwnProperty.call(process.env, key)) return;
+      process.env[key] = match[2].replace(/^["']|["']$/g, "");
+    });
+  });
+}
+
+function resolveDashScopeApiKey(apiKey) {
+  return String(apiKey || process.env.DASHSCOPE_API_KEY || process.env.QWEN_API_KEY || "").trim();
+}
+
+function resolveHostedImageApiKey(apiKey) {
+  return String(apiKey || process.env.OPENAI_IMAGE_API_KEY || process.env.OPENAI_API_KEY || process.env.GRSAI_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+}
+
+function resolveGrsaiApiKey(apiKey) {
+  return String(apiKey || process.env.GRSAI_API_KEY || "").trim();
+}
+
+function resolveGeminiApiKey(apiKey) {
+  return String(apiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+}
+
+function resolveOpenAiImageApiKey(apiKey) {
+  return String(apiKey || process.env.OPENAI_IMAGE_API_KEY || process.env.OPENAI_API_KEY || "").trim();
+}
+
 function isGeminiImageModel(model) {
   return GEMINI_IMAGE_MODELS.has(String(model || "").trim());
+}
+
+function isGrsaiImageModel(model) {
+  return GRSAI_IMAGE_MODELS.has(String(model || "").trim());
+}
+
+function isOpenAiImageModel(model) {
+  return OPENAI_IMAGE_MODELS.has(String(model || "").trim());
+}
+
+function isHostedImageModel(model) {
+  return isGeminiImageModel(model) || isGrsaiImageModel(model) || isOpenAiImageModel(model);
+}
+
+function resolveGrsaiHost(host) {
+  const value = String(host || process.env.GRSAI_HOST || "domestic").trim();
+  if (/^https?:\/\//i.test(value)) return value.replace(/\/+$/, "");
+  return (GRSAI_HOSTS[value] || GRSAI_HOSTS.domestic).replace(/\/+$/, "");
+}
+
+function resolveOpenAiImageEndpoint(endpointOrHost) {
+  const value = String(
+    endpointOrHost
+    || process.env.OPENAI_IMAGE_GENERATIONS_URL
+    || process.env.OPENAI_IMAGE_BASE_URL
+    || process.env.OPENAI_BASE_URL
+    || OPENAI_IMAGE_DEFAULT_HOST,
+  ).trim().replace(/\/+$/, "");
+  if (new RegExp(`${OPENAI_IMAGE_GENERATIONS_PATH.replace(/\//g, "\\/")}$`, "i").test(value)) {
+    return value;
+  }
+  return `${value}${OPENAI_IMAGE_GENERATIONS_PATH}`;
 }
 
 function extensionToMimeType(extension) {
@@ -51,6 +162,7 @@ function extensionToMimeType(extension) {
   if (normalized === ".jpg" || normalized === ".jpeg") return "image/jpeg";
   if (normalized === ".webp") return "image/webp";
   if (normalized === ".bmp") return "image/bmp";
+  if (normalized === ".gif") return "image/gif";
   return "image/png";
 }
 
@@ -59,7 +171,17 @@ function pickExtensionFromMimeType(mimeType) {
   if (mime.includes("jpeg") || mime.includes("jpg")) return ".jpg";
   if (mime.includes("webp")) return ".webp";
   if (mime.includes("bmp")) return ".bmp";
+  if (mime.includes("gif")) return ".gif";
   return ".png";
+}
+
+function getImageExtensionFromBuffer(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 12) return "";
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return ".png";
+  if (buffer[0] === 0xff && buffer[1] === 0xd8) return ".jpg";
+  if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 && buffer.slice(8, 12).toString("ascii") === "WEBP") return ".webp";
+  if (buffer.slice(0, 6).toString("ascii") === "GIF87a" || buffer.slice(0, 6).toString("ascii") === "GIF89a") return ".gif";
+  return "";
 }
 
 function inferAspectRatioFromSize(size) {
@@ -95,14 +217,40 @@ function normalizeGeminiImageSize(size) {
   return "4K";
 }
 
+function normalizeOpenAiImageSize(size, slideAspect) {
+  const raw = String(size || "").trim().toLowerCase().replace("*", "x");
+  if (raw === "auto") return "auto";
+  if (/^\d+x\d+$/.test(raw)) return raw;
+
+  const quality = String(size || "").trim().toUpperCase();
+  const aspect = String(slideAspect || "").trim();
+  if (aspect === "1:1") {
+    return quality === "4K" ? "2048x2048" : "1024x1024";
+  }
+  if (aspect === "4:3") {
+    if (quality === "4K") return "2048x1536";
+    if (quality === "1K") return "1024x768";
+    return "1536x1152";
+  }
+  if (aspect === "9:16") {
+    if (quality === "4K") return "2160x3840";
+    if (quality === "1K") return "864x1536";
+    return "1024x1536";
+  }
+  if (quality === "4K") return "3840x2160";
+  if (quality === "1K") return "1536x864";
+  return "2048x1152";
+}
+
 function parseDataUrl(dataUrl) {
-  const match = String(dataUrl || "").trim().match(/^data:([^;,]+)?;base64,(.+)$/i);
+  const match = String(dataUrl || "").trim().match(/^data:([^;,]+)?;base64,([\s\S]+)$/i);
   if (!match) return null;
   const mimeType = match[1] || "image/png";
+  const buffer = Buffer.from(String(match[2] || "").replace(/[\s\r\n\t]+/g, ""), "base64");
   return {
     mimeType,
     extension: pickExtensionFromMimeType(mimeType),
-    buffer: Buffer.from(match[2], "base64"),
+    buffer,
   };
 }
 
@@ -162,6 +310,89 @@ async function loadGeminiImageSource(source) {
   }
 
   throw new Error("Gemini 目前只支持 data URL、本地缓存图或 http(s) 图片链接作为输入。");
+}
+
+function toDataUrl(buffer, mimeType) {
+  return `data:${mimeType || "application/octet-stream"};base64,${buffer.toString("base64")}`;
+}
+
+function getPptSlideSize(slideAspect) {
+  switch (String(slideAspect || "").trim()) {
+    case "4:3":
+      return { width: 1024, height: 768 };
+    case "1:1":
+      return { width: 1080, height: 1080 };
+    default:
+      return { width: 1280, height: 720 };
+  }
+}
+
+function getPptLayout(slideAspect) {
+  switch (String(slideAspect || "").trim()) {
+    case "4:3":
+      return { name: "PPTGEN_4_3", width: 10, height: 7.5 };
+    case "1:1":
+      return { name: "PPTGEN_1_1", width: 7.5, height: 7.5 };
+    default:
+      return { name: "PPTGEN_16_9", width: 13.333, height: 7.5 };
+  }
+}
+
+function toPptPosition(position, slideSize, layout) {
+  return {
+    x: (position.left / slideSize.width) * layout.width,
+    y: (position.top / slideSize.height) * layout.height,
+    w: (position.width / slideSize.width) * layout.width,
+    h: (position.height / slideSize.height) * layout.height,
+  };
+}
+
+async function saveReferenceImage(file) {
+  const extension = pickExtensionFromMimeType(file.mimetype || extensionToMimeType(path.extname(file.originalname)));
+  const assetId = crypto.randomUUID();
+  const fileName = `${assetId}${extension}`;
+  const targetPath = path.join(REFERENCE_ASSETS_DIR, fileName);
+  await fsp.mkdir(REFERENCE_ASSETS_DIR, { recursive: true });
+  await fsp.writeFile(targetPath, file.buffer);
+  return {
+    assetId,
+    fileName,
+    savedPath: targetPath,
+    previewUrl: `/reference-assets/${encodeURIComponent(fileName)}`,
+  };
+}
+
+async function loadReferenceAssetAsDataUrl(referenceFile) {
+  const fileName = String(referenceFile?.assetFileName || "").trim()
+    || (String(referenceFile?.previewUrl || "").startsWith("/reference-assets/")
+      ? decodeURIComponent(String(referenceFile.previewUrl).slice("/reference-assets/".length))
+      : "");
+  if (!fileName || fileName.includes("/") || fileName.includes("\\")) return "";
+  const targetPath = path.join(REFERENCE_ASSETS_DIR, fileName);
+  const buffer = await fsp.readFile(targetPath);
+  return toDataUrl(buffer, referenceFile?.mimeType || extensionToMimeType(path.extname(fileName)));
+}
+
+function normalizeExportText(value) {
+  return String(value || "")
+    .replace(/\r/g, "")
+    .replace(/\u00a0/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function buildExportSlides(pages) {
+  return (Array.isArray(pages) ? pages : []).map((page, index) => {
+    const fallbackTitle = `第 ${index + 1} 页`;
+    const title = normalizeExportText(page?.onscreenTitle || page?.pageTitle || fallbackTitle).split("\n")[0].trim();
+    const body = normalizeExportText(page?.onscreenBody || page?.onscreenContent || page?.pageContent || "");
+    return {
+      pageNumber: Number(page?.pageNumber || index + 1),
+      title: title || fallbackTitle,
+      body,
+      imageUrl: String(page?.imageUrl || page?.baseImage || "").trim(),
+    };
+  });
 }
 
 async function convertMessagesToGeminiContents(messages) {
@@ -229,6 +460,22 @@ function buildGeminiModelUrl(model) {
   return `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}`;
 }
 
+function buildGrsaiModelUrl(model, host) {
+  return `${resolveGrsaiHost(host)}/v1beta/models/${encodeURIComponent(model)}`;
+}
+
+function buildGrsaiDrawUrl(host) {
+  return `${resolveGrsaiHost(host)}/v1/draw/nano-banana`;
+}
+
+function buildGrsaiResultUrl(host) {
+  return `${resolveGrsaiHost(host)}/v1/draw/result`;
+}
+
+function buildOpenAiImageGenerationsUrl(baseUrl) {
+  return resolveOpenAiImageEndpoint(baseUrl);
+}
+
 async function requestJsonViaFetch({ url, method = "POST", headers = {}, body }) {
   const response = await fetch(url, {
     method,
@@ -238,104 +485,173 @@ async function requestJsonViaFetch({ url, method = "POST", headers = {}, body })
   return parseJsonResponse(response);
 }
 
-async function requestJsonViaPowerShell({ url, method = "POST", headers = {}, body = "" }) {
-  await fsp.mkdir(DATA_DIR, { recursive: true });
-  const requestFile = path.join(DATA_DIR, `gemini-request-${crypto.randomUUID()}.json`);
-  const scriptFile = path.join(DATA_DIR, `gemini-request-${crypto.randomUUID()}.ps1`);
-
-  const script = [
-    "param([string]$RequestFile)",
-    "$ErrorActionPreference = 'Stop'",
-    "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
-    "$request = Get-Content -Raw -Encoding UTF8 $RequestFile | ConvertFrom-Json",
-    "$headers = @{}",
-    "if ($request.headers) {",
-    "  $request.headers.PSObject.Properties | ForEach-Object {",
-    "    $headers[$_.Name] = [string]$_.Value",
-    "  }",
-    "}",
-    "try {",
-    "  if ($request.body) {",
-    "    $response = Invoke-RestMethod -Method $request.method -Uri $request.url -Headers $headers -ContentType 'application/json; charset=utf-8' -Body ([string]$request.body)",
-    "  } else {",
-    "    $response = Invoke-RestMethod -Method $request.method -Uri $request.url -Headers $headers",
-    "  }",
-    "  @{ ok = $true; status = 200; data = $response } | ConvertTo-Json -Depth 100",
-    "} catch {",
-    "  $status = 500",
-    "  $content = ''",
-    "  if ($_.Exception.Response) {",
-    "    try { $status = [int]$_.Exception.Response.StatusCode } catch {}",
-    "    try {",
-    "      $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())",
-    "      $content = $reader.ReadToEnd()",
-    "      $reader.Close()",
-    "    } catch {}",
-    "  }",
-    "  if (-not $content) { $content = $_.Exception.Message }",
-    "  $parsed = $null",
-    "  try { $parsed = $content | ConvertFrom-Json } catch {}",
-    "  if ($parsed) {",
-    "    @{ ok = $false; status = $status; data = $parsed } | ConvertTo-Json -Depth 100",
-    "  } else {",
-    "    @{ ok = $false; status = $status; data = @{ message = [string]$content } } | ConvertTo-Json -Depth 100",
-    "  }",
-    "}",
-  ].join("\r\n");
-
-  await fsp.writeFile(requestFile, JSON.stringify({ url, method, headers, body }), "utf8");
-  await fsp.writeFile(scriptFile, script, "utf8");
-
-  try {
-    const result = await new Promise((resolve, reject) => {
-      const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptFile, requestFile], {
-        windowsHide: true,
-      });
-
-      let stdout = "";
-      let stderr = "";
-
-      child.stdout.on("data", (chunk) => {
-        stdout += chunk.toString("utf8");
-      });
-      child.stderr.on("data", (chunk) => {
-        stderr += chunk.toString("utf8");
-      });
-      child.on("error", reject);
-      child.on("close", (code) => {
-        if (code !== 0 && !stdout.trim()) {
-          reject(new Error(stderr.trim() || `PowerShell request failed with code ${code}.`));
-          return;
-        }
-
-        try {
-          resolve(JSON.parse(stdout.trim() || "{}"));
-        } catch (error) {
-          reject(new Error(stderr.trim() || stdout.trim() || error.message));
-        }
-      });
-    });
-    return result;
-  } finally {
-    await Promise.allSettled([
-      fsp.unlink(requestFile),
-      fsp.unlink(scriptFile),
-    ]);
-  }
-}
-
 async function requestGeminiJson(request) {
-  if (process.platform === "win32") {
-    try {
-      return await requestJsonViaPowerShell(request);
-    } catch (error) {
-      return requestJsonViaFetch(request);
-    }
-  }
   return requestJsonViaFetch(request);
 }
 
+function buildOpenAiImageGenerationBody({ payload, slideAspect }) {
+  const extracted = extractPromptAndImagesFromPayload(payload);
+  if (!extracted.prompt) {
+    const error = new Error("OpenAI 图片请求缺少提示词。");
+    error.status = 400;
+    throw error;
+  }
+  return {
+    model: String(payload?.model || "gpt-image-2").trim() || "gpt-image-2",
+    prompt: extracted.prompt,
+    size: normalizeOpenAiImageSize(payload?.parameters?.size, slideAspect),
+    response_format: "b64_json",
+    ...(extracted.urls.length ? { image: extracted.urls } : {}),
+  };
+}
+
+async function normalizeOpenAiImageGenerationResponse(data, model) {
+  const requestId = String(data?.id || data?.request_id || data?.response_id || crypto.randomUUID()).trim();
+  const content = [];
+
+  const rawItems = Array.isArray(data?.data) ? data.data : (Array.isArray(data?.images) ? data.images : (Array.isArray(data?.urls) ? data.urls : (Array.isArray(data) ? data : [])));
+
+  const choices = data?.output?.choices || data?.choices;
+  if (Array.isArray(choices) && choices.length > 0) {
+    const choiceContent = choices[0]?.message?.content;
+    if (Array.isArray(choiceContent)) {
+      for (const item of choiceContent) {
+        if (item.type === "image" && item.image) content.push(item);
+        else if (item.type === "text" && item.text) content.push(item);
+      }
+    } else if (typeof choiceContent === "string") {
+      content.push({ type: "text", text: choiceContent });
+    }
+  }
+
+  let imageIndex = 0;
+  for (const item of rawItems) {
+    let rawData = "";
+    let revisedPrompt = "";
+
+    if (typeof item === "string") {
+      rawData = item.trim();
+    } else if (item && typeof item === "object") {
+      rawData = String(item.b64_json || item.url || item.image || "").trim();
+      revisedPrompt = String(item.revised_prompt || "").trim();
+    }
+
+    if (revisedPrompt) content.push({ type: "text", text: revisedPrompt });
+
+    if (rawData) {
+      let buffer = null;
+      let finalUrl = "";
+      let extension = ".png";
+
+      const sniff = async (input) => {
+        if (!input || typeof input !== "string") return null;
+        const current = input.trim();
+
+        if (/^https?:\/\//i.test(current)) {
+          finalUrl = current;
+          return null;
+        }
+
+        if (current.startsWith("data:")) {
+          const p = parseDataUrl(current);
+          if (!p) return null;
+          const detectedExtension = getImageExtensionFromBuffer(p.buffer);
+          if (!detectedExtension) return null;
+          extension = detectedExtension || p.extension || extension;
+          return p.buffer;
+        }
+
+        try {
+          const normalizedBase64 = current.replace(/[\s\r\n\t]+/g, "");
+          if (!/^[A-Za-z0-9+/]+={0,2}$/.test(normalizedBase64) || normalizedBase64.length % 4 === 1) {
+            return null;
+          }
+          const b = Buffer.from(normalizedBase64, "base64");
+          if (b.length < 10) return null;
+
+          const detectedExtension = getImageExtensionFromBuffer(b);
+          if (detectedExtension) {
+            extension = detectedExtension;
+            return b;
+          }
+
+          const asText = b.toString("utf8").trim();
+          if (asText.startsWith("{") || asText.startsWith("[")) {
+             try {
+               const nested = JSON.parse(asText);
+               const nextRaw = nested.url || nested.image || nested.b64_json || (Array.isArray(nested.data) ? (nested.data[0]?.url || nested.data[0]?.b64_json) : "");
+               if (nextRaw && nextRaw !== current) return await sniff(nextRaw);
+             } catch {}
+          }
+
+          return null;
+        } catch {
+          return null;
+        }
+      };
+
+      buffer = await sniff(rawData);
+
+      if (finalUrl) {
+        content.push({ type: "image", image: finalUrl });
+      } else if (buffer) {
+        imageIndex += 1;
+        const saved = await saveGeneratedBufferToFile(buffer, {
+          prefix: "gpt_image_2",
+          requestId,
+          index: imageIndex,
+          extension,
+        });
+        content.push({ type: "image", image: saved.localUrl });
+      }
+    }
+  }
+
+  const hasImage = content.some((item) => item.type === "image" && item.image);
+  if (!hasImage && rawItems.length > 0) {
+    const error = new Error("OpenAI 图片接口返回了非图片内容，未保存为图片文件。请检查中转站响应字段是否为 url 或 b64_json。");
+    error.status = 502;
+    error.details = data;
+    throw error;
+  }
+
+  return {
+    request_id: requestId,
+    provider: "openai-image",
+    model,
+    usage: data?.usage || null,
+    output: { choices: [{ message: { content } }] },
+    raw: data,
+  };
+}
+
+async function requestOpenAiImageGenerate({ apiKey, payload, slideAspect, baseUrl }) {
+  const body = buildOpenAiImageGenerationBody({ payload, slideAspect });
+  const parsed = await requestJsonViaFetch({
+    method: "POST",
+    url: buildOpenAiImageGenerationsUrl(baseUrl),
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!parsed.ok) {
+    const error = new Error(parsed.data?.error?.message || parsed.data?.message || "OpenAI 图片生成请求失败。");
+    error.status = parsed.status || 500;
+    error.details = parsed.data;
+    throw error;
+  }
+  return normalizeOpenAiImageGenerationResponse(parsed.data, body.model);
+}
+
 async function normalizeGeminiGenerateResponse(data, model) {
+  if (Array.isArray(data?.results)) {
+    return normalizeGrsaiDrawResponse(data, model);
+  }
+  if (Array.isArray(data?.data?.results)) {
+    return normalizeGrsaiDrawResponse(data.data, model);
+  }
   const candidate = Array.isArray(data?.candidates) ? data.candidates[0] : null;
   const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
   const requestId = String(data?.responseId || data?.response_id || crypto.randomUUID()).trim();
@@ -349,16 +665,23 @@ async function normalizeGeminiGenerateResponse(data, model) {
     }
 
     const inlineData = part?.inlineData || part?.inline_data;
-    if (!inlineData?.data) continue;
-    imageIndex += 1;
-    const mimeType = inlineData.mimeType || inlineData.mime_type || "image/png";
-    const saved = await saveGeneratedBufferToFile(Buffer.from(inlineData.data, "base64"), {
-      prefix: "gemini",
-      requestId,
-      index: imageIndex,
-      extension: pickExtensionFromMimeType(mimeType),
-    });
-    content.push({ type: "image", image: saved.localUrl });
+    if (inlineData?.data) {
+      imageIndex += 1;
+      const mimeType = inlineData.mimeType || inlineData.mime_type || "image/png";
+      const saved = await saveGeneratedBufferToFile(Buffer.from(inlineData.data, "base64"), {
+        prefix: "gemini",
+        requestId,
+        index: imageIndex,
+        extension: pickExtensionFromMimeType(mimeType),
+      });
+      content.push({ type: "image", image: saved.localUrl });
+      continue;
+    }
+
+    const fileUri = part?.fileData?.fileUri || part?.file_data?.file_uri;
+    if (typeof fileUri === "string" && fileUri.trim()) {
+      content.push({ type: "image", image: fileUri.trim() });
+    }
   }
 
   return {
@@ -376,6 +699,136 @@ async function normalizeGeminiGenerateResponse(data, model) {
       ],
     },
   };
+}
+
+function normalizeGrsaiDrawResponse(data, model) {
+  const results = Array.isArray(data?.results) ? data.results : [];
+  const content = [];
+  results.forEach((item) => {
+    if (typeof item?.content === "string" && item.content.trim()) {
+      content.push({ type: "text", text: item.content.trim() });
+    }
+    if (typeof item?.url === "string" && item.url.trim()) {
+      content.push({ type: "image", image: item.url.trim() });
+    }
+  });
+  return {
+    request_id: String(data?.id || crypto.randomUUID()),
+    provider: "grsai",
+    model,
+    usage: null,
+    output: {
+      choices: [
+        {
+          message: {
+            content,
+          },
+        },
+      ],
+    },
+    raw: data,
+  };
+}
+
+function extractPromptAndImagesFromPayload(payload) {
+  const texts = [];
+  const urls = [];
+  const messages = Array.isArray(payload?.input?.messages) ? payload.input.messages : [];
+  messages.forEach((message) => {
+    const content = Array.isArray(message?.content) ? message.content : [];
+    content.forEach((item) => {
+      if (typeof item?.text === "string" && item.text.trim()) texts.push(item.text.trim());
+      if (typeof item?.image === "string" && item.image.trim()) urls.push(item.image.trim());
+    });
+  });
+  return {
+    prompt: texts.join("\n\n").trim(),
+    urls,
+  };
+}
+
+async function requestGrsaiGenerate({ apiKey, model, payload, slideAspect, size, host }) {
+  const geminiBody = await buildGeminiGenerationBody({ payload, slideAspect });
+  const compatible = await requestJsonViaFetch({
+    method: "POST",
+    url: `${buildGrsaiModelUrl(model, host)}:generateContent`,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+      "x-goog-api-key": apiKey,
+    },
+    body: JSON.stringify(geminiBody),
+  });
+  const compatibleHasResult = Array.isArray(compatible.data?.candidates)
+    || Array.isArray(compatible.data?.results)
+    || Array.isArray(compatible.data?.data?.results);
+  if (compatible.ok && compatibleHasResult) {
+    return normalizeGeminiGenerateResponse(compatible.data, model);
+  }
+
+  const fallback = extractPromptAndImagesFromPayload(payload);
+  if (!fallback.prompt) {
+    const error = new Error("Grsai 请求缺少提示词。");
+    error.status = compatible.status || 500;
+    error.details = compatible.data;
+    throw error;
+  }
+
+  const draw = await requestJsonViaFetch({
+    method: "POST",
+    url: buildGrsaiDrawUrl(host),
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      prompt: fallback.prompt,
+      aspectRatio: normalizeGeminiAspectRatio(slideAspect, size),
+      imageSize: normalizeGeminiImageSize(size || payload?.parameters?.size),
+      urls: fallback.urls,
+      webHook: "-1",
+      shutProgress: false,
+    }),
+  });
+  if (!draw.ok || draw.data?.code) {
+    const error = new Error(draw.data?.msg || draw.data?.message || compatible.data?.message || "Grsai 生图请求失败。");
+    error.status = draw.status || compatible.status || 500;
+    error.details = { compatible: compatible.data, draw: draw.data };
+    throw error;
+  }
+
+  const taskId = draw.data?.data?.id || draw.data?.id;
+  if (!taskId) {
+    return normalizeGrsaiDrawResponse(draw.data?.data || draw.data, model);
+  }
+
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, attempt < 3 ? 1000 : 2000));
+    const result = await requestJsonViaFetch({
+      method: "POST",
+      url: buildGrsaiResultUrl(host),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ id: taskId }),
+    });
+    if (!result.ok || result.data?.code) {
+      continue;
+    }
+    const data = result.data?.data || result.data;
+    if (data?.status === "succeeded") return normalizeGrsaiDrawResponse(data, model);
+    if (data?.status === "failed") {
+      const error = new Error(data.error || data.failure_reason || "Grsai 生图失败。");
+      error.details = data;
+      throw error;
+    }
+  }
+
+  const timeout = new Error("Grsai 生图任务仍在运行，请稍后重试。");
+  timeout.details = { taskId };
+  throw timeout;
 }
 
 function getDefaultLibraryDoc() {
@@ -588,11 +1041,15 @@ async function extractFileText(file) {
     };
   }
 
-  if ([".png", ".jpg", ".jpeg", ".bmp", ".gif"].includes(extension)) {
+  if ([".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"].includes(extension)) {
+    const saved = await saveReferenceImage(file);
     return {
       extractedText: "",
       parseStatus: "image",
       parseNote: "图片文件会作为视觉参考保留。",
+      assetId: saved.assetId,
+      assetFileName: saved.fileName,
+      previewUrl: saved.previewUrl,
     };
   }
 
@@ -626,7 +1083,6 @@ async function extractFileText(file) {
     parseNote: "文件已接收，当前未自动提取正文。",
   };
 }
-
 function pickFileExtension(imageUrl, contentType) {
   const pathname = (() => {
     try {
@@ -938,18 +1394,18 @@ function buildHeuristicResearchQuery(pageTitle, pageContent) {
     if (value && !parts.includes(value)) parts.push(value);
   };
 
-  if (/智能窗|智能玻璃|调光玻璃|Smart Window|Smart Glass/i.test(text)) {
+  if (/鏅鸿兘绐梶鏅鸿兘鐜荤拑|璋冨厜鐜荤拑|Smart Window|Smart Glass/i.test(text)) {
     push("smart window");
     push("smart glass");
   }
-  if (/电致变色|electrochromic/i.test(text)) push("electrochromic");
-  if (/热致变色|thermochromic/i.test(text)) push("thermochromic");
-  if (/光致变色|photochromic/i.test(text)) push("photochromic");
-  if (/\bPDLC\b|液晶/i.test(text)) push("PDLC");
+  if (/鐢佃嚧鍙樿壊|electrochromic/i.test(text)) push("electrochromic");
+  if (/鐑嚧鍙樿壊|thermochromic/i.test(text)) push("thermochromic");
+  if (/鍏夎嚧鍙樿壊|photochromic/i.test(text)) push("photochromic");
+  if (/\bPDLC\b|娑叉櫠/i.test(text)) push("PDLC");
   if (/\bSPD\b/i.test(text)) push("SPD");
-  if (/发展历史|演进|历程|概述|定义|分类|history|overview/i.test(text)) push("technology history");
-  if (/建筑|节能|幕墙|采光|energy|building/i.test(text)) push("building energy saving");
-  if (/应用|场景|市场|未来|趋势|application|market|future/i.test(text)) push("applications market");
+  if (/鍙戝睍鍘嗗彶|婕旇繘|鍘嗙▼|姒傝堪|瀹氫箟|鍒嗙被|history|overview/i.test(text)) push("technology history");
+  if (/寤虹瓚|鑺傝兘|骞曞|閲囧厜|energy|building/i.test(text)) push("building energy saving");
+  if (/搴旂敤|鍦烘櫙|甯傚満|鏈潵|瓒嬪娍|application|market|future/i.test(text)) push("applications market");
 
   return parts.join(" ").trim();
 }
@@ -958,10 +1414,22 @@ app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
     service: "nanobanana-ppt-studio",
-    port: PORT,
+    port: ACTIVE_PORT,
     generatedDir: GENERATED_DIR,
     libraryDocPath: LIBRARY_DOC_PATH,
     supportedRegions: Object.keys(REGION_MAP),
+    configuredKeys: {
+      dashscope: Boolean(resolveDashScopeApiKey("")),
+      hostedImage: Boolean(resolveHostedImageApiKey("")),
+      grsai: Boolean(resolveGrsaiApiKey("")),
+      gemini: Boolean(resolveGeminiApiKey("")),
+      openAiImage: Boolean(resolveOpenAiImageApiKey("")),
+    },
+    workflowModels: {
+      assistant: process.env.WORKFLOW_ASSISTANT_MODEL || "qwen3.6-plus",
+      style: process.env.WORKFLOW_STYLE_MODEL || process.env.QWEN_LIGHTWEIGHT_MODEL || "qwen-turbo-latest",
+      jit: process.env.WORKFLOW_JIT_MODEL || process.env.QWEN_LIGHTWEIGHT_MODEL || "qwen-turbo-latest",
+    },
   });
 });
 
@@ -1006,17 +1474,28 @@ app.post("/api/library", async (req, res) => {
 
 installWorkflowRoutes(app, {
   resolveRegion,
+  resolveGrsaiHost,
+  resolveDashScopeApiKey,
+  resolveHostedImageApiKey,
+  resolveGrsaiApiKey,
+  resolveGeminiApiKey,
+  resolveOpenAiImageApiKey,
   parseJsonResponse,
   requestGeminiJson,
+  requestGrsaiGenerate,
+  requestOpenAiImageGenerate,
   normalizeGeminiGenerateResponse,
   buildGeminiModelUrl,
+  buildGrsaiModelUrl,
   normalizeGeminiAspectRatio,
   normalizeGeminiImageSize,
   parseDataUrl,
+  loadReferenceAssetAsDataUrl,
 });
 
 app.post("/api/test-image-key", async (req, res) => {
-  const { apiKey, googleApiKey, region, model } = req.body || {};
+  const { apiKey, googleApiKey, grsaiApiKey, openAiImageApiKey, openAiImageBaseUrl, region, model, grsaiHost } = req.body || {};
+  const effectiveApiKey = resolveDashScopeApiKey(apiKey);
 
   if (!model) {
     return res.status(400).json({
@@ -1025,18 +1504,64 @@ app.post("/api/test-image-key", async (req, res) => {
     });
   }
 
-  if (isGeminiImageModel(model)) {
-    if (!googleApiKey) {
+  if (isHostedImageModel(model)) {
+    const effectiveGoogleApiKey = isOpenAiImageModel(model)
+      ? resolveOpenAiImageApiKey(openAiImageApiKey)
+      : isGrsaiImageModel(model)
+        ? resolveGrsaiApiKey(grsaiApiKey)
+        : resolveGeminiApiKey(googleApiKey);
+    if (!effectiveGoogleApiKey) {
       return res.status(400).json({
         code: "MissingGoogleApiKey",
-        message: "请先填写 Google API Key。",
+        message: "请先填写生图 API Key。",
       });
+    }
+
+    if (isOpenAiImageModel(model)) {
+      return res.json({
+        ok: true,
+        provider: "openai-image",
+        message: `OpenAI 图片接口 Key 已填写，模型 ${model} 将使用 ${resolveOpenAiImageEndpoint(openAiImageBaseUrl)}。`,
+      });
+    }
+
+    if (isGrsaiImageModel(model)) {
+      try {
+        const parsed = await requestJsonViaFetch({
+          method: "POST",
+          url: buildGrsaiResultUrl(grsaiHost),
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${effectiveGoogleApiKey}`,
+          },
+          body: JSON.stringify({ id: "codex-health-check" }),
+        });
+        const serviceCode = Number(parsed.data?.code);
+        if (!parsed.ok || (Number.isFinite(serviceCode) && serviceCode !== 0 && serviceCode !== -22)) {
+          return res.status(parsed.ok ? 400 : parsed.status).json({
+            code: "GrsaiKeyTestFailed",
+            message: parsed.data?.msg || parsed.data?.message || "Grsai API Key 测试失败。",
+            details: parsed.data,
+          });
+        }
+        return res.json({
+          ok: true,
+          provider: "grsai",
+          message: `Grsai API 可访问，模型 ${model} 将使用 ${resolveGrsaiHost(grsaiHost)}。`,
+          details: parsed.data,
+        });
+      } catch (error) {
+        return res.status(500).json({
+          code: "GrsaiKeyTestFailed",
+          message: error.message || "Grsai API Key 测试失败。",
+        });
+      }
     }
 
     try {
       const parsed = await requestGeminiJson({
         method: "GET",
-        url: `${buildGeminiModelUrl(model)}?key=${encodeURIComponent(googleApiKey)}`,
+        url: `${buildGeminiModelUrl(model)}?key=${encodeURIComponent(effectiveGoogleApiKey)}`,
       });
 
       if (!parsed.ok) {
@@ -1050,7 +1575,7 @@ app.post("/api/test-image-key", async (req, res) => {
       return res.json({
         ok: true,
         provider: "gemini",
-        message: `Google API Key 可用，可访问 ${model}。`,
+        message: `Google API Key 可用，可以访问 ${model}。`,
       });
     } catch (error) {
       return res.status(500).json({
@@ -1060,7 +1585,7 @@ app.post("/api/test-image-key", async (req, res) => {
     }
   }
 
-  if (!apiKey) {
+  if (!effectiveApiKey) {
     return res.status(400).json({
       code: "MissingApiKey",
       message: "请先填写 DashScope / Qwen API Key。",
@@ -1072,12 +1597,12 @@ app.post("/api/test-image-key", async (req, res) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${effectiveApiKey}`,
       },
       body: JSON.stringify({
         model: "qwen3.5-plus",
         messages: [
-          { role: "user", content: "请只回复 OK" },
+          { role: "user", content: "璇峰彧鍥炲 OK" },
         ],
         stream: false,
       }),
@@ -1091,7 +1616,7 @@ app.post("/api/test-image-key", async (req, res) => {
     return res.json({
       ok: true,
       provider: "dashscope",
-      message: "DashScope / Qwen API Key 可用，可正常调用 Qwen。",
+      message: "DashScope / Qwen API Key 可用，可以正常调用 Qwen。",
     });
   } catch (error) {
     return res.status(500).json({
@@ -1102,26 +1627,54 @@ app.post("/api/test-image-key", async (req, res) => {
 });
 
 app.post("/api/generate", async (req, res, next) => {
-  const { googleApiKey, slideAspect, payload } = req.body || {};
+  const { googleApiKey, grsaiApiKey, openAiImageApiKey, openAiImageBaseUrl, slideAspect, payload, grsaiHost } = req.body || {};
 
-  if (!isGeminiImageModel(payload?.model)) {
+  if (!isHostedImageModel(payload?.model)) {
     return next();
   }
 
-  if (!googleApiKey) {
+  const effectiveGoogleApiKey = isOpenAiImageModel(payload.model)
+    ? resolveOpenAiImageApiKey(openAiImageApiKey)
+    : isGrsaiImageModel(payload.model)
+      ? resolveGrsaiApiKey(grsaiApiKey)
+      : resolveGeminiApiKey(googleApiKey);
+
+  if (!effectiveGoogleApiKey) {
     return res.status(400).json({
       code: "MissingGoogleApiKey",
-      message: "请先填写 Google API Key，再调用 Nano Banana。",
+      message: "请先填写生图 API Key，再调用生图模型。",
     });
   }
 
   try {
+    if (isOpenAiImageModel(payload.model)) {
+      const normalized = await requestOpenAiImageGenerate({
+        apiKey: effectiveGoogleApiKey,
+        payload,
+        slideAspect,
+        baseUrl: openAiImageBaseUrl,
+      });
+      return res.json(normalized);
+    }
+
+    if (isGrsaiImageModel(payload.model)) {
+      const normalized = await requestGrsaiGenerate({
+        apiKey: effectiveGoogleApiKey,
+        model: payload.model,
+        payload,
+        slideAspect,
+        size: payload?.parameters?.size,
+        host: grsaiHost,
+      });
+      return res.json(normalized);
+    }
+
     const geminiBody = await buildGeminiGenerationBody({ payload, slideAspect });
     const parsed = await requestGeminiJson({
       method: "POST",
       url: `${buildGeminiModelUrl(payload.model)}:generateContent`,
       headers: {
-        "x-goog-api-key": googleApiKey,
+        "x-goog-api-key": effectiveGoogleApiKey,
       },
       body: JSON.stringify(geminiBody),
     });
@@ -1146,8 +1699,9 @@ app.post("/api/generate", async (req, res, next) => {
 
 app.post("/api/generate", async (req, res) => {
   const { apiKey, region, asyncMode, payload } = req.body || {};
+  const effectiveApiKey = resolveDashScopeApiKey(apiKey);
 
-  if (!apiKey) {
+  if (!effectiveApiKey) {
     return res.status(400).json({
       code: "MissingApiKey",
       message: "请先在页面中填写 API Key。",
@@ -1186,7 +1740,7 @@ app.post("/api/generate", async (req, res) => {
   try {
     const headers = {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+    Authorization: `Bearer ${effectiveApiKey}`,
     };
 
     if (asyncMode) {
@@ -1211,8 +1765,9 @@ app.post("/api/generate", async (req, res) => {
 
 app.post("/api/tasks/fetch", async (req, res) => {
   const { apiKey, region, taskId } = req.body || {};
+  const effectiveApiKey = resolveDashScopeApiKey(apiKey);
 
-  if (!apiKey || !taskId) {
+  if (!effectiveApiKey || !taskId) {
     return res.status(400).json({
       code: "MissingParams",
       message: "查询任务需要 API Key 和 task_id。",
@@ -1223,7 +1778,7 @@ app.post("/api/tasks/fetch", async (req, res) => {
     const response = await fetch(buildTaskUrl(region, taskId), {
       method: "GET",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${effectiveApiKey}`,
       },
     });
 
@@ -1239,8 +1794,9 @@ app.post("/api/tasks/fetch", async (req, res) => {
 
 app.post("/api/assistant", async (req, res) => {
   const { apiKey, region, payload } = req.body || {};
+  const effectiveApiKey = resolveDashScopeApiKey(apiKey);
 
-  if (!apiKey) {
+  if (!effectiveApiKey) {
     return res.status(400).json({
       code: "MissingApiKey",
       message: "调用提示词助手前请先填写 API Key。",
@@ -1259,7 +1815,7 @@ app.post("/api/assistant", async (req, res) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${effectiveApiKey}`,
       },
       body: JSON.stringify(payload),
     });
@@ -1276,8 +1832,9 @@ app.post("/api/assistant", async (req, res) => {
 
 app.post("/api/research-supplements", async (req, res) => {
   const { apiKey, region, page, themeLabel, visibleText, searchQuery: requestedSearchQuery } = req.body || {};
+  const effectiveApiKey = resolveDashScopeApiKey(apiKey);
 
-  if (!apiKey) {
+  if (!effectiveApiKey) {
     return res.status(400).json({
       code: "MissingApiKey",
       message: "调用联网补充前请先填写 API Key。",
@@ -1307,7 +1864,7 @@ app.post("/api/research-supplements", async (req, res) => {
   const generatedQuery = requestedSearchQuery
     ? ""
     : await generateResearchSearchQuery({
-      apiKey,
+      apiKey: effectiveApiKey,
       region,
       pageType,
       pageTitle,
@@ -1339,7 +1896,7 @@ app.post("/api/research-supplements", async (req, res) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${effectiveApiKey}`,
       },
       body: JSON.stringify({
         model: "qwen3.5-plus",
@@ -1371,7 +1928,7 @@ app.post("/api/research-supplements", async (req, res) => {
 
     if (!parsedJson || typeof parsedJson !== "object") {
       const repaired = await repairResearchOutputAsJson({
-        apiKey,
+        apiKey: effectiveApiKey,
         region,
         rawText: outputText || JSON.stringify(parsed.data),
       });
@@ -1432,6 +1989,9 @@ app.post("/api/files/parse", upload.array("files", 20), async (req, res) => {
           previewText: extractedText.slice(0, 2400),
           parseStatus: parsed.parseStatus,
           parseNote: parsed.parseNote,
+          assetId: parsed.assetId || "",
+          assetFileName: parsed.assetFileName || "",
+          previewUrl: parsed.previewUrl || "",
         });
       } catch (error) {
         parsedFiles.push({
@@ -1561,10 +2121,167 @@ app.post("/api/download", async (req, res) => {
   }
 });
 
+app.post("/api/export-workflow-ppt", async (req, res) => {
+  const { projectTitle, slideAspect, pages } = req.body || {};
+  const exportSlides = buildExportSlides(pages);
+
+  if (!exportSlides.length) {
+    return res.status(400).json({
+      code: "MissingSlides",
+      message: "导出 PPT 需要至少一页内容。",
+    });
+  }
+
+  try {
+    const slideSize = getPptSlideSize(slideAspect);
+    const layout = getPptLayout(slideAspect);
+    const pptx = new PptxGenJS();
+    const deckTitle = normalizeExportText(projectTitle) || "智能生成导出";
+    pptx.author = "Nano Banana PPT Studio";
+    pptx.company = "PPTgen";
+    pptx.subject = "Workflow PPT export";
+    pptx.title = deckTitle;
+    pptx.lang = "zh-CN";
+    pptx.defineLayout(layout);
+    pptx.layout = layout.name;
+
+    for (const slideData of exportSlides) {
+      const slide = pptx.addSlide();
+      const margin = Math.round(slideSize.width * 0.05);
+      const innerWidth = slideSize.width - margin * 2;
+      const titleTop = Math.round(slideSize.height * 0.065);
+      const titleHeight = Math.round(slideSize.height * 0.09);
+      const pageBadgeWidth = Math.round(slideSize.width * 0.12);
+      const imageTop = Math.round(slideSize.height * 0.19);
+      const imageHeight = slideData.imageUrl ? Math.round(slideSize.height * 0.50) : 0;
+      const bodyTop = slideData.imageUrl ? imageTop + imageHeight + Math.round(slideSize.height * 0.04) : imageTop;
+      const bodyHeight = slideSize.height - bodyTop - margin;
+
+      slide.background = { color: "F5F7FB" };
+      slide.addShape(pptx.ShapeType.roundRect, {
+        ...toPptPosition({
+          left: Math.round(slideSize.width * 0.022),
+          top: Math.round(slideSize.height * 0.03),
+          width: Math.round(slideSize.width * 0.956),
+          height: Math.round(slideSize.height * 0.94),
+        }, slideSize, layout),
+        fill: { color: "FFFFFF" },
+        line: { color: "D9E2EC", width: 1 },
+      });
+      slide.addShape(pptx.ShapeType.roundRect, {
+        ...toPptPosition({
+          left: margin,
+          top: Math.round(slideSize.height * 0.042),
+          width: Math.round(slideSize.width * 0.11),
+          height: Math.round(slideSize.height * 0.01),
+        }, slideSize, layout),
+        fill: { color: "2563EB" },
+        line: { color: "2563EB", transparency: 100 },
+      });
+      slide.addText(slideData.title, {
+        ...toPptPosition({
+          left: margin,
+          top: titleTop,
+          width: innerWidth - pageBadgeWidth - 20,
+          height: titleHeight,
+        }, slideSize, layout),
+        fontSize: Math.round(slideSize.height * 0.045),
+        bold: true,
+        color: "0F172A",
+        fontFace: "Microsoft YaHei",
+        valign: "mid",
+        fit: "shrink",
+      });
+      slide.addText(`第 ${slideData.pageNumber} 页`, {
+        ...toPptPosition({
+          left: slideSize.width - margin - pageBadgeWidth,
+          top: titleTop + 4,
+          width: pageBadgeWidth,
+          height: Math.round(slideSize.height * 0.05),
+        }, slideSize, layout),
+        shape: pptx.ShapeType.roundRect,
+        fill: { color: "EEF4FF" },
+        line: { color: "EEF4FF", transparency: 100 },
+        fontSize: Math.round(slideSize.height * 0.022),
+        color: "2563EB",
+        bold: true,
+        fontFace: "Microsoft YaHei",
+        align: "center",
+        valign: "mid",
+      });
+
+      if (slideData.imageUrl) {
+        const image = await loadGeminiImageSource(slideData.imageUrl);
+        slide.addImage({
+          data: toDataUrl(image.buffer, image.mimeType),
+          altText: slideData.title,
+          ...toPptPosition({
+            left: margin,
+            top: imageTop,
+            width: innerWidth,
+            height: imageHeight,
+          }, slideSize, layout),
+        });
+      }
+
+      slide.addShape(pptx.ShapeType.roundRect, {
+        ...toPptPosition({
+          left: margin,
+          top: bodyTop,
+          width: innerWidth,
+          height: Math.max(bodyHeight, Math.round(slideSize.height * 0.18)),
+        }, slideSize, layout),
+        fill: { color: "F8FAFC" },
+        line: { color: "E2E8F0", width: 1 },
+      });
+      slide.addText(slideData.body || " ", {
+        ...toPptPosition({
+          left: margin + Math.round(slideSize.width * 0.018),
+          top: bodyTop + Math.round(slideSize.height * 0.018),
+          width: innerWidth - Math.round(slideSize.width * 0.036),
+          height: Math.max(bodyHeight - Math.round(slideSize.height * 0.036), Math.round(slideSize.height * 0.14)),
+        }, slideSize, layout),
+        fontSize: slideData.imageUrl ? Math.round(slideSize.height * 0.024) : Math.round(slideSize.height * 0.03),
+        color: "334155",
+        fontFace: "Microsoft YaHei",
+        margin: 0,
+        fit: "shrink",
+        breakLine: false,
+      });
+    }
+
+    const fileName = `${sanitizeSegment(deckTitle, "workflow-export")}_${buildTimestamp()}_${crypto.randomUUID().slice(0, 6)}.pptx`;
+    const targetPath = path.join(EXPORTS_DIR, fileName);
+    await pptx.writeFile({ fileName: targetPath, compression: true });
+
+    return res.json({
+      ok: true,
+      fileName,
+      savedPath: targetPath,
+      downloadUrl: `/exports/${encodeURIComponent(fileName)}`,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      code: "WorkflowPptExportFailed",
+      message: error.message || "导出 PPT 失败。",
+    });
+  }
+});
 function startServer(port) {
   const server = app.listen(port, () => {
-    console.log(`Nano Banana PPT Studio is running at http://localhost:${port}`);
+    ACTIVE_PORT = Number(port);
+    const url = `http://localhost:${port}`;
+    console.log(`Nano Banana PPT Studio is running at ${url}`);
     console.log(`Generated images will be saved to ${GENERATED_DIR}`);
+    if (process.pkg) {
+      const { exec } = require("child_process");
+      const cmd = process.platform === "win32"
+        ? `start "" "${url}"`
+        : process.platform === "darwin"
+          ? `open "${url}"`
+          : `xdg-open "${url}"`;
+      exec(cmd, () => {});
+    }
   });
 
   server.on("error", (error) => {
@@ -1579,3 +2296,5 @@ function startServer(port) {
 }
 
 startServer(Number(PORT) || 3000);
+
+
