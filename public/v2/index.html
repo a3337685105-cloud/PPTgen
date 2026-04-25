@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PPT Studio | AI 控制台</title>
+    <title>PPTGEN | AI 控制台</title>
     <link rel="stylesheet" href="/v2/styles.css" />
   </head>
   <body>
@@ -12,8 +12,8 @@
         <div class="brand">
           <div class="brand-mark">P</div>
           <div>
-            <div class="brand-title">智能生成</div>
-            <div class="brand-subtitle">AI PPT Console</div>
+            <div class="brand-title">PPTGEN</div>
+            <div class="brand-subtitle">PPTGEN Console</div>
           </div>
         </div>
 
@@ -43,6 +43,13 @@
             <span id="workspaceZoomValue">100%</span>
           </div>
         </section>
+
+        <section class="sidebar-card workflow-note">
+          <div class="sidebar-card-title">使用提示</div>
+          <p>本工具生成的 PPT 是纯图片，不同于常规 PPT，无法通过普通对象编辑。</p>
+          <p>若图片生成有误，可直接重新生成，或在改图区通过描述/划定区域定位元素并修改。</p>
+          <p>若仅是文字渲染错误，可在 Office 中用同色块覆盖后手动打字修正。</p>
+        </section>
       </aside>
 
       <main class="workspace">
@@ -50,7 +57,7 @@
           <section class="view is-active" id="view-smart" data-view="smart">
             <div class="view-header">
               <div>
-                <span class="eyebrow">AI PPT Studio</span>
+                <span class="eyebrow">PPTGEN</span>
                 <h1>智能生成</h1>
               </div>
               <div class="status-line" id="statusBar"></div>
@@ -161,11 +168,11 @@
                     <div class="quick-api-panel">
                       <label class="field">
                         <span>DashScope / Qwen API Key</span>
-                        <input id="quickApiKey" type="password" placeholder="用于内容拆分和风格匹配；本机已配置可留空" />
+                        <input id="quickApiKey" type="password" placeholder="用于内容拆分和风格匹配" />
                       </label>
                       <label class="field" id="quickGeminiKeyField" hidden>
                         <span>Gemini API Key</span>
-                        <input id="quickGoogleApiKey" type="password" placeholder="用于 Gemini 生图；本机已配置可留空" />
+                        <input id="quickGoogleApiKey" type="password" placeholder="用于 Gemini 生图" />
                       </label>
                       <label class="field" id="quickGrsaiKeyField" hidden>
                         <span>Grsai API Key</span>
@@ -173,7 +180,7 @@
                       </label>
                       <label class="field" id="quickOpenAiImageKeyField" hidden>
                         <span>GPT Image API Key</span>
-                        <input id="quickOpenAiImageApiKey" type="password" placeholder="用于 gpt-image-2；本机已配置可留空" />
+                        <input id="quickOpenAiImageApiKey" type="password" placeholder="用于 gpt-image-2" />
                       </label>
                       <label class="field" id="quickGrsaiHostField" hidden>
                         <span>Grsai Host</span>
@@ -345,7 +352,6 @@
                   <article class="glass-card page-list-card">
                     <div class="card-heading">
                       <div>
-                        <span class="eyebrow">Pages</span>
                         <h2>页面列表</h2>
                       </div>
                       <button class="btn ghost" type="button" id="addManualPageBtn" title="添加一页">＋</button>
@@ -356,10 +362,13 @@
 
                   <article class="glass-card onscreen-card">
                     <div class="card-heading">
-                      <span class="eyebrow">Content</span>
                       <h2>上屏内容</h2>
                       <p id="pageMetaHint"></p>
                     </div>
+                    <label class="field page-style-keyword-field" id="pageGlobalStylePromptField">
+                      <span>风格关键词</span>
+                      <input id="pageGlobalStylePrompt" type="text" placeholder="例如：浅色、通透、杂志感、蓝灰配色" />
+                    </label>
                     <div class="onscreen-preview" id="pageOnscreenPreview"></div>
                     <label class="field field-stack grow">
                       <span>正文</span>
@@ -374,37 +383,35 @@
 
                   <article class="glass-card artboard-card">
                     <div class="card-heading">
-                      <span class="eyebrow">Generate</span>
-                      <h2>生图区</h2>
+                      <h2>生图/改图区</h2>
                     </div>
-                    <div class="artboard-toolbar">
-                      <button class="btn ghost" type="button" id="uploadOverlayBtn">上传补充图片</button>
-                      <input id="overlayFileInput" type="file" accept="image/*" multiple hidden />
-                      <button class="btn ghost" type="button" id="clearOverlayBtn">清空叠加</button>
-                    </div>
-                    <div class="slide-frame" id="slideFrame">
-                      <div class="slide-stage" id="slideStage">
-                        <img id="slideBaseImage" alt="" hidden />
-                        <div class="slide-empty" id="slideEmptyState">生成前这里是空白画布。生成后，结果图会自动成为这页的底图。</div>
-                        <div class="overlay-layer" id="overlayLayer"></div>
+                    <div class="artboard-workspace">
+                      <div class="artboard-toolbar">
+                        <button class="btn ghost" type="button" id="uploadOverlayBtn">上传补充图片</button>
+                        <input id="overlayFileInput" type="file" accept="image/*" multiple hidden />
+                        <button class="btn ghost" type="button" id="clearOverlayBtn">清空叠加</button>
+                      </div>
+                      <div class="slide-frame" id="slideFrame">
+                        <div class="slide-stage" id="slideStage">
+                          <img id="slideBaseImage" alt="" hidden />
+                          <div class="slide-empty" id="slideEmptyState">生成前这里是空白画布。生成后，结果图会自动成为这页的底图。</div>
+                          <div class="overlay-layer" id="overlayLayer"></div>
+                        </div>
                       </div>
                     </div>
-                    <div class="result-strip" id="pageResultStrip"></div>
                     <div class="stage-footer tight">
                       <button class="btn ghost cancel-btn" type="button" id="cancelGenerateCurrentPageBtn" hidden>取消</button>
                       <button class="btn secondary" type="button" id="viewCurrentPageLargeBtn" disabled>查看大图</button>
                       <button class="btn secondary" type="button" id="copyPagePromptBtn" disabled>复制提示词</button>
                       <button class="btn secondary" type="button" id="modifyCurrentPageBtn" disabled>按要求修改</button>
+                      <button class="btn secondary" type="button" id="saveCurrentPageImageBtn" disabled>另存图片</button>
                       <button class="btn primary" type="button" id="generateCurrentPageBtn">生成该页</button>
                     </div>
                     <label class="field field-stack" id="pageExtraPromptField">
                       <span>该页提示词</span>
                       <textarea id="pageExtraPrompt" rows="5" placeholder="首次生成可写风格补充；生成后可写修改要求，再点击“按要求修改”。"></textarea>
                     </label>
-                    <label class="field field-stack" id="gptPageStyleField" hidden>
-                      <span>GPT 该页风格提示词</span>
-                      <textarea id="gptPageStylePrompt" rows="5"></textarea>
-                    </label>
+                    <div class="result-strip" id="pageResultStrip"></div>
                     <details class="trace-details prompt-trace-details" hidden>
                       <summary>查看这一页的 Prompt 流转</summary>
                       <pre id="pagePromptTrace"></pre>
@@ -424,7 +431,7 @@
           <section class="view" id="view-history" data-view="history">
             <div class="view-header">
               <div>
-                <span class="eyebrow">Archive</span>
+                <span class="eyebrow">PPTGEN</span>
                 <h1>历史生图</h1>
               </div>
             </div>
@@ -452,7 +459,7 @@
           <section class="view" id="view-revise" data-view="revise">
             <div class="view-header">
               <div>
-                <span class="eyebrow">Edit</span>
+                <span class="eyebrow">PPTGEN</span>
                 <h1>改图 / 框选</h1>
               </div>
             </div>
@@ -496,7 +503,7 @@
           <section class="view" id="view-settings" data-view="settings">
             <div class="view-header">
               <div>
-                <span class="eyebrow">Settings</span>
+                <span class="eyebrow">PPTGEN</span>
                 <h1>接口与参数</h1>
               </div>
             </div>
@@ -612,7 +619,10 @@
       <div class="image-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="pageImageModalTitle">
         <div class="image-modal-header">
           <strong id="pageImageModalTitle">当前页大图</strong>
-          <button class="icon-btn" type="button" id="closePageImageModalBtn" aria-label="关闭大图">×</button>
+          <div class="image-modal-actions">
+            <button class="btn secondary" type="button" id="savePageImageModalBtn">另存图片</button>
+            <button class="icon-btn" type="button" id="closePageImageModalBtn" aria-label="关闭大图">×</button>
+          </div>
         </div>
         <div class="image-modal-body">
           <img id="pageImageModalImg" alt="当前页大图" />

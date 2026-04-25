@@ -111,6 +111,18 @@ input:focus, select:focus, textarea:focus {
 .brand-title { font-size: 18px; font-weight: 800; letter-spacing: 0; }
 .brand-subtitle { margin-top: 2px; font-size: 11px; color: var(--text-muted); font-weight: 700; }
 
+.workflow-note {
+  margin-top: auto;
+  display: grid;
+  gap: 8px;
+}
+.workflow-note p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .sidebar-nav { display: flex; flex-direction: column; gap: 8px; }
 .sidebar-tab {
   display: grid;
@@ -670,16 +682,30 @@ body[data-workflow-provider="standard"] #quickOpenAiImageKeyField {
 }
 .pages-stage-grid .onscreen-body-field textarea,
 .pages-stage-grid .onscreen-card .field-stack textarea {
-  min-height: 320px;
+  min-height: 300px;
 }
+.page-style-keyword-field input { min-height: 42px; }
 .onscreen-preview { display: none !important; }
 
 .artboard-card { overflow: auto; scrollbar-gutter: stable; }
-.artboard-toolbar { flex-wrap: wrap; }
+.artboard-workspace {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+}
+.artboard-toolbar {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+}
+.artboard-toolbar .btn,
+.page-draw-toolbar .btn { width: 100%; }
 .slide-frame {
   flex: 0 0 auto;
   min-height: 0;
-  padding: 16px;
+  padding: 14px;
   border: 1px solid var(--line);
   border-radius: 24px;
   background: linear-gradient(180deg, rgba(239,245,252,0.9), rgba(255,255,255,0.78));
@@ -712,6 +738,7 @@ body[data-workflow-provider="standard"] #quickOpenAiImageKeyField {
   z-index: 1;
   user-select: none;
   -webkit-user-drag: none;
+  cursor: zoom-in;
 }
 .slide-empty {
   position: absolute;
@@ -761,7 +788,12 @@ body[data-workflow-provider="standard"] #quickOpenAiImageKeyField {
   border-right: 2px solid #fff;
   border-bottom: 2px solid #fff;
 }
-.page-draw-toolbar { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.page-draw-toolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
 .tool-btn.is-active {
   color: var(--accent-strong);
   background: var(--accent-soft);
@@ -791,6 +823,8 @@ body[data-workflow-provider="standard"] #quickOpenAiImageKeyField {
   border-radius: 16px;
   background: rgba(255,255,255,0.72);
 }
+.artboard-card #pageExtraPrompt { min-height: 92px; }
+.artboard-card .field-stack { gap: 6px; }
 .page-result-header {
   display: flex;
   flex-direction: column;
@@ -918,6 +952,12 @@ body[data-workflow-provider="standard"] #quickOpenAiImageKeyField {
   justify-content: space-between;
   gap: 12px;
 }
+.history-project-title strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .history-page-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -948,6 +988,8 @@ body[data-workflow-provider="standard"] #quickOpenAiImageKeyField {
   border-radius: 10px;
   border: 1px solid var(--line);
 }
+.history-image-primary,
+.history-image-thumbs img { cursor: zoom-in; }
 
 .revise-stage {
   flex: 1;
@@ -1045,6 +1087,11 @@ body[data-workflow-provider="standard"] #quickOpenAiImageKeyField {
   padding: 14px 18px;
   border-bottom: 1px solid var(--line);
 }
+.image-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .image-modal-body { padding: 18px; overflow: auto; }
 .image-modal-body img {
   width: 100%;
@@ -1054,7 +1101,13 @@ body[data-workflow-provider="standard"] #quickOpenAiImageKeyField {
 }
 
 body[data-workflow-mode="gpt"] [data-step="theme"] {
-  opacity: 0.42;
+  display: none;
+}
+body[data-workflow-mode="gpt"] .smart-ribbon {
+  grid-template-columns: minmax(150px, 1fr) 38px minmax(150px, 1fr) 38px minmax(180px, 1.1fr);
+}
+body[data-workflow-mode="gpt"] .smart-ribbon > .ribbon-arrow:nth-child(6) {
+  display: none;
 }
 body[data-workflow-mode="gpt"] #themePromptDetails {
   display: none;
@@ -1089,6 +1142,18 @@ body[data-workflow-mode="gpt"] #themePromptDetails {
   .revise-grid,
   .settings-grid {
     grid-template-columns: 1fr;
+  }
+  .artboard-workspace {
+    grid-template-columns: 1fr;
+  }
+  .artboard-toolbar,
+  .page-draw-toolbar {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .artboard-toolbar .btn,
+  .page-draw-toolbar .btn {
+    width: auto;
   }
   .smart-ribbon { grid-template-columns: 1fr; }
   .ribbon-arrow { display: none; }

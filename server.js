@@ -1,4 +1,14 @@
-﻿const crypto = require("crypto");
+﻿if (typeof DOMMatrix === "undefined") {
+  global.DOMMatrix = class DOMMatrix {};
+}
+if (typeof ImageData === "undefined") {
+  global.ImageData = class ImageData {};
+}
+if (typeof Path2D === "undefined") {
+  global.Path2D = class Path2D {};
+}
+
+const crypto = require("crypto");
 const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
@@ -15,9 +25,10 @@ const PORT = process.env.PORT || 3000;
 let ACTIVE_PORT = Number(PORT);
 const ROOT_DIR = __dirname;
 const PUBLIC_DIR = path.join(ROOT_DIR, "public");
-const GENERATED_DIR = path.join(ROOT_DIR, "generated-images");
-const EXPORTS_DIR = path.join(ROOT_DIR, "exports");
-const DATA_DIR = path.join(ROOT_DIR, "data");
+const RUNTIME_DIR = process.pkg ? path.dirname(process.execPath) : __dirname;
+const GENERATED_DIR = path.join(RUNTIME_DIR, "generated-images");
+const EXPORTS_DIR = path.join(RUNTIME_DIR, "exports");
+const DATA_DIR = path.join(RUNTIME_DIR, "data");
 const REFERENCE_ASSETS_DIR = path.join(DATA_DIR, "reference-assets");
 const LIBRARY_DOC_PATH = path.join(DATA_DIR, "studio-library.json");
 
@@ -75,7 +86,7 @@ function resolveRegion(region) {
 
 function loadLocalEnv() {
   [".env.local", ".env"].forEach((fileName) => {
-    const filePath = path.join(ROOT_DIR, fileName);
+    const filePath = path.join(RUNTIME_DIR, fileName);
     if (!fs.existsSync(filePath)) return;
     const content = fs.readFileSync(filePath, "utf8");
     content.split(/\r?\n/).forEach((line) => {
@@ -164,6 +175,15 @@ function pickExtensionFromMimeType(mimeType) {
   return ".png";
 }
 
+function getImageExtensionFromBuffer(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 12) return "";
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return ".png";
+  if (buffer[0] === 0xff && buffer[1] === 0xd8) return ".jpg";
+  if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 && buffer.slice(8, 12).toString("ascii") === "WEBP") return ".webp";
+  if (buffer.slice(0, 6).toString("ascii") === "GIF87a" || buffer.slice(0, 6).toString("ascii") === "GIF89a") return ".gif";
+  return "";
+}
+
 function inferAspectRatioFromSize(size) {
   const match = String(size || "").trim().match(/^(\d+)\*(\d+)$/);
   if (!match) return "";
@@ -223,13 +243,14 @@ function normalizeOpenAiImageSize(size, slideAspect) {
 }
 
 function parseDataUrl(dataUrl) {
-  const match = String(dataUrl || "").trim().match(/^data:([^;,]+)?;base64,(.+)$/i);
+  const match = String(dataUrl || "").trim().match(/^data:([^;,]+)?;base64,([\s\S]+)$/i);
   if (!match) return null;
   const mimeType = match[1] || "image/png";
+  const buffer = Buffer.from(String(match[2] || "").replace(/[\s\r\n\t]+/g, ""), "base64");
   return {
     mimeType,
     extension: pickExtensionFromMimeType(mimeType),
-    buffer: Buffer.from(match[2], "base64"),
+    buffer,
   };
 }
 
@@ -485,27 +506,113 @@ function buildOpenAiImageGenerationBody({ payload, slideAspect }) {
 }
 
 async function normalizeOpenAiImageGenerationResponse(data, model) {
-  const requestId = String(data?.id || data?.request_id || crypto.randomUUID()).trim();
+  const requestId = String(data?.id || data?.request_id || data?.response_id || crypto.randomUUID()).trim();
   const content = [];
-  const items = Array.isArray(data?.data) ? data.data : [];
+
+  const rawItems = Array.isArray(data?.data) ? data.data : (Array.isArray(data?.images) ? data.images : (Array.isArray(data?.urls) ? data.urls : (Array.isArray(data) ? data : [])));
+
+  const choices = data?.output?.choices || data?.choices;
+  if (Array.isArray(choices) && choices.length > 0) {
+    const choiceContent = choices[0]?.message?.content;
+    if (Array.isArray(choiceContent)) {
+      for (const item of choiceContent) {
+        if (item.type === "image" && item.image) content.push(item);
+        else if (item.type === "text" && item.text) content.push(item);
+      }
+    } else if (typeof choiceContent === "string") {
+      content.push({ type: "text", text: choiceContent });
+    }
+  }
 
   let imageIndex = 0;
-  for (const item of items) {
-    if (typeof item?.revised_prompt === "string" && item.revised_prompt.trim()) {
-      content.push({ type: "text", text: item.revised_prompt.trim() });
+  for (const item of rawItems) {
+    let rawData = "";
+    let revisedPrompt = "";
+
+    if (typeof item === "string") {
+      rawData = item.trim();
+    } else if (item && typeof item === "object") {
+      rawData = String(item.b64_json || item.url || item.image || "").trim();
+      revisedPrompt = String(item.revised_prompt || "").trim();
     }
-    if (typeof item?.b64_json === "string" && item.b64_json.trim()) {
-      imageIndex += 1;
-      const saved = await saveGeneratedBufferToFile(Buffer.from(item.b64_json, "base64"), {
-        prefix: "gpt_image_2",
-        requestId,
-        index: imageIndex,
-        extension: ".png",
-      });
-      content.push({ type: "image", image: saved.localUrl });
-    } else if (typeof item?.url === "string" && item.url.trim()) {
-      content.push({ type: "image", image: item.url.trim() });
+
+    if (revisedPrompt) content.push({ type: "text", text: revisedPrompt });
+
+    if (rawData) {
+      let buffer = null;
+      let finalUrl = "";
+      let extension = ".png";
+
+      const sniff = async (input) => {
+        if (!input || typeof input !== "string") return null;
+        const current = input.trim();
+
+        if (/^https?:\/\//i.test(current)) {
+          finalUrl = current;
+          return null;
+        }
+
+        if (current.startsWith("data:")) {
+          const p = parseDataUrl(current);
+          if (!p) return null;
+          const detectedExtension = getImageExtensionFromBuffer(p.buffer);
+          if (!detectedExtension) return null;
+          extension = detectedExtension || p.extension || extension;
+          return p.buffer;
+        }
+
+        try {
+          const normalizedBase64 = current.replace(/[\s\r\n\t]+/g, "");
+          if (!/^[A-Za-z0-9+/]+={0,2}$/.test(normalizedBase64) || normalizedBase64.length % 4 === 1) {
+            return null;
+          }
+          const b = Buffer.from(normalizedBase64, "base64");
+          if (b.length < 10) return null;
+
+          const detectedExtension = getImageExtensionFromBuffer(b);
+          if (detectedExtension) {
+            extension = detectedExtension;
+            return b;
+          }
+
+          const asText = b.toString("utf8").trim();
+          if (asText.startsWith("{") || asText.startsWith("[")) {
+             try {
+               const nested = JSON.parse(asText);
+               const nextRaw = nested.url || nested.image || nested.b64_json || (Array.isArray(nested.data) ? (nested.data[0]?.url || nested.data[0]?.b64_json) : "");
+               if (nextRaw && nextRaw !== current) return await sniff(nextRaw);
+             } catch {}
+          }
+
+          return null;
+        } catch {
+          return null;
+        }
+      };
+
+      buffer = await sniff(rawData);
+
+      if (finalUrl) {
+        content.push({ type: "image", image: finalUrl });
+      } else if (buffer) {
+        imageIndex += 1;
+        const saved = await saveGeneratedBufferToFile(buffer, {
+          prefix: "gpt_image_2",
+          requestId,
+          index: imageIndex,
+          extension,
+        });
+        content.push({ type: "image", image: saved.localUrl });
+      }
     }
+  }
+
+  const hasImage = content.some((item) => item.type === "image" && item.image);
+  if (!hasImage && rawItems.length > 0) {
+    const error = new Error("OpenAI 图片接口返回了非图片内容，未保存为图片文件。请检查中转站响应字段是否为 url 或 b64_json。");
+    error.status = 502;
+    error.details = data;
+    throw error;
   }
 
   return {
@@ -513,15 +620,7 @@ async function normalizeOpenAiImageGenerationResponse(data, model) {
     provider: "openai-image",
     model,
     usage: data?.usage || null,
-    output: {
-      choices: [
-        {
-          message: {
-            content,
-          },
-        },
-      ],
-    },
+    output: { choices: [{ message: { content } }] },
     raw: data,
   };
 }
@@ -2171,8 +2270,18 @@ app.post("/api/export-workflow-ppt", async (req, res) => {
 function startServer(port) {
   const server = app.listen(port, () => {
     ACTIVE_PORT = Number(port);
-    console.log(`Nano Banana PPT Studio is running at http://localhost:${port}`);
+    const url = `http://localhost:${port}`;
+    console.log(`Nano Banana PPT Studio is running at ${url}`);
     console.log(`Generated images will be saved to ${GENERATED_DIR}`);
+    if (process.pkg) {
+      const { exec } = require("child_process");
+      const cmd = process.platform === "win32"
+        ? `start "" "${url}"`
+        : process.platform === "darwin"
+          ? `open "${url}"`
+          : `xdg-open "${url}"`;
+      exec(cmd, () => {});
+    }
   });
 
   server.on("error", (error) => {

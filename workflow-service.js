@@ -2259,11 +2259,14 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
   });
 
   app.post("/api/workflow/page/reprepare", async (req, res) => {
-    const { apiKey, region, jobId, pageId, onscreenContent, autoExpandToMaxChars } = req.body || {};
+    const { apiKey, region, jobId, pageId, pageTitle, onscreenContent, autoExpandToMaxChars } = req.body || {};
     const effectiveApiKey = resolveDashScopeApiKey(apiKey);
     try {
       const job = getWorkflowJobOrThrow(jobId);
       const page = getWorkflowPageOrThrow(job, pageId);
+      if (String(pageTitle || "").trim()) {
+        page.pageTitle = stringifyStructuredField(pageTitle).trim();
+      }
       const nextOnscreenContent = String(onscreenContent || "").trim();
       if (!nextOnscreenContent) {
         return res.status(400).json({ code: "MissingOnscreenContent", message: "请先填写这页的上屏内容。" });
@@ -2347,6 +2350,7 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
       imageModel,
       jobId,
       pageId,
+      pageTitle,
       slideAspect,
       size,
       seed,
@@ -2378,9 +2382,13 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
     try {
       const job = getWorkflowJobOrThrow(jobId);
       const page = getWorkflowPageOrThrow(job, pageId);
+      if (String(pageTitle || "").trim()) {
+        page.pageTitle = stringifyStructuredField(pageTitle).trim();
+      }
       if (String(onscreenContent || "").trim()) {
         page.onscreenContent = normalizeOnscreenContent(String(onscreenContent || "").trim());
         page.onscreenContentText = page.onscreenContent;
+        page.pageContent = page.onscreenContent;
         preparePageForGeneration(job, page, "generate-inline");
       }
       page.generationStatus = "preparing";
@@ -2426,6 +2434,7 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
       page.promptTrace.finalImage = {
         builtAt: new Date().toISOString(),
         model: selectedImageModel,
+        pageTitle: page.pageTitle || "",
         prompt: finalPrompt,
         extraPrompt: String(extraPrompt || "").trim(),
         ...finalPromptTrace,
@@ -2636,6 +2645,7 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
       imageModel,
       jobId,
       pageId,
+      pageTitle,
       extraPrompt,
       pageStylePrompt,
       canvasImage,
@@ -2651,9 +2661,13 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
     try {
       const job = getWorkflowJobOrThrow(jobId);
       const page = getWorkflowPageOrThrow(job, pageId);
+      if (String(pageTitle || "").trim()) {
+        page.pageTitle = stringifyStructuredField(pageTitle).trim();
+      }
       if (String(onscreenContent || "").trim()) {
         page.onscreenContent = normalizeOnscreenContent(String(onscreenContent || "").trim());
         page.onscreenContentText = page.onscreenContent;
+        page.pageContent = page.onscreenContent;
         preparePageForGeneration(job, page, "prompt-copy");
       }
       let finalPrompt = "";
@@ -2698,6 +2712,7 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
       page.promptTrace.finalImage = {
         builtAt: new Date().toISOString(),
         model: selectedImageModel,
+        pageTitle: page.pageTitle || "",
         prompt: finalPrompt,
         extraPrompt: String(extraPrompt || "").trim(),
         ...finalPromptTrace,

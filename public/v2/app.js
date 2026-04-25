@@ -151,6 +151,7 @@ const state = {
   workflowPollTimer: null,
   selectedPageId: "",
   pageDrafts: {},
+  gptSharedStylePrompt: "",
   workflowProjectsIndex: [],
   workflowProjectSnapshots: {},
   selectedHistoryProjectId: "",
@@ -247,6 +248,8 @@ function cacheElements() {
     "workflowPageList",
     "addManualPageBtn",
     "pageMetaHint",
+    "pageGlobalStylePromptField",
+    "pageGlobalStylePrompt",
     "pageOnscreenPreview",
     "pageOnscreenEditor",
     "pageVisualElementsBlock",
@@ -267,13 +270,12 @@ function cacheElements() {
     "generateCurrentPageBtn",
     "cancelGenerateCurrentPageBtn",
     "modifyCurrentPageBtn",
-    "gptPageStyleField",
-    "gptPageStylePrompt",
     "pageExtraPromptField",
     "pageExtraPrompt",
     "pagePromptTrace",
     "pageResultStrip",
     "viewCurrentPageLargeBtn",
+    "saveCurrentPageImageBtn",
     "copyPagePromptBtn",
     "exportWorkflowPptBtn",
     "historySummary",
@@ -282,7 +284,9 @@ function cacheElements() {
     "historyPageGrid",
     "restoreHistoryProjectBtn",
     "pageImageModal",
+    "pageImageModalTitle",
     "pageImageModalImg",
+    "savePageImageModalBtn",
     "closePageImageModalBtn",
     "revisePrevBtn",
     "reviseNextBtn",
@@ -556,6 +560,7 @@ function saveState() {
     workflowJob: state.workflowJob,
     selectedPageId: state.selectedPageId,
     pageDrafts: draftToStore,
+    gptSharedStylePrompt: state.gptSharedStylePrompt,
     workflowProjectsIndex: state.workflowProjectsIndex,
     workflowProjectSnapshots: state.workflowProjectSnapshots,
     selectedHistoryProjectId: state.selectedHistoryProjectId,
@@ -594,6 +599,7 @@ function loadState() {
   state.workflowJob = parsed.workflowJob || null;
   state.selectedPageId = String(parsed.selectedPageId || "");
   state.pageDrafts = parsed.pageDrafts && typeof parsed.pageDrafts === "object" ? parsed.pageDrafts : {};
+  state.gptSharedStylePrompt = String(parsed.gptSharedStylePrompt || "");
   state.workflowProjectsIndex = Array.isArray(parsed.workflowProjectsIndex) ? parsed.workflowProjectsIndex : [];
   state.workflowProjectSnapshots = parsed.workflowProjectSnapshots && typeof parsed.workflowProjectSnapshots === "object"
     ? parsed.workflowProjectSnapshots
@@ -642,6 +648,7 @@ function applyStateToUi() {
   el.outputSize.value = state.settings.outputSize || "2K";
   el.seed.value = state.settings.seed || "";
   el.revisePrompt.value = state.revise.prompt || "";
+  if (el.pageGlobalStylePrompt) el.pageGlobalStylePrompt.value = state.gptSharedStylePrompt || "";
   syncGeminiSearchControls();
 }
 
@@ -901,6 +908,19 @@ function syncWorkflowModelCards() {
   });
 }
 
+function syncQuickKeyPlaceholders() {
+  const ck = state.serverConfig?.configuredKeys;
+  if (!ck) return;
+  const setPlaceholder = (element, baseText, isConfigured) => {
+    if (!element) return;
+    element.placeholder = isConfigured ? `${baseText}；本机已配置可留空` : baseText;
+  };
+  setPlaceholder(el.quickApiKey, "用于内容拆分和风格匹配", ck.dashscope);
+  setPlaceholder(el.quickGoogleApiKey, "用于 Gemini 生图", ck.gemini);
+  setPlaceholder(el.quickGrsaiApiKey, "用于 Grsai Nano Banana / Gemini 3.1 Pro", ck.grsai);
+  setPlaceholder(el.quickOpenAiImageApiKey, "用于 gpt-image-2", ck.openAiImage);
+}
+
 function syncWorkflowModeUi() {
   const isGpt = usingGptSimpleWorkflow();
   const isGemini = usingGeminiWorkflowModel();
@@ -915,6 +935,8 @@ function syncWorkflowModeUi() {
     button.disabled = isGpt;
     button.classList.toggle("is-disabled", isGpt);
   });
+  const pagesStepNumber = document.querySelector('[data-step="pages"] span');
+  if (pagesStepNumber) pagesStepNumber.textContent = isGpt ? "2" : "3";
   if (el.workflowModelHint) {
     el.workflowModelHint.textContent = isGpt
       ? "GPT Image 2 轻链路：拆分内容后，逐页填写风格提示词并直接生图。"
@@ -1038,6 +1060,25 @@ function isPageGenerating(pageId) {
 
 function getCurrentSharedPromptValue() {
   return String(el.pageExtraPrompt?.value || "").trim();
+}
+
+function getCurrentGptStylePromptValue() {
+  return String(state.gptSharedStylePrompt || el.pageGlobalStylePrompt?.value || "").trim();
+}
+
+function composeGptPageStylePrompt(pagePrompt = getCurrentSharedPromptValue()) {
+  return [getCurrentGptStylePromptValue(), String(pagePrompt || "").trim()].filter(Boolean).join("\n");
+}
+
+function getEffectivePageStylePrompt(pagePrompt = getCurrentSharedPromptValue()) {
+  return usingGptSimpleWorkflow() ? composeGptPageStylePrompt(pagePrompt) : String(pagePrompt || "").trim();
+}
+
+function appendDrawingRemovalInstruction(prompt, hasCanvasImage = true) {
+  const base = String(prompt || "").trim();
+  if (!hasCanvasImage) return base;
+  const instruction = "修改完成之后去掉用户手绘标记。";
+  return base.includes(instruction) ? base : [base, instruction].filter(Boolean).join("\n");
 }
 
 function ensurePageDraft(page) {
@@ -1235,13 +1276,11 @@ function renderHistoryProjectsLegacy() {
     <div class="page-item history-project-item ${project.jobId === selectedProjectId ? "is-active" : ""}" data-history-project-id="${escapeHtml(project.jobId)}">
       <div class="history-project-title">
         <strong>${escapeHtml(project.title || "未命名项目")}</strong>
-        <span class="status-pill ${project.jobId === state.workflowJobId ? "generated" : "idle"}">${project.jobId === state.workflowJobId ? "当前项目" : "历史项目"}</span>
       </div>
       <div class="page-meta">
-        <span class="meta-pill">${escapeHtml(project.themeName || "未命名主题")}</span>
         <span class="meta-pill">${escapeHtml(`${project.totalPages || 0} 页`)}</span>
+        <span class="meta-pill">${escapeHtml(new Date(project.updatedAt || project.createdAt || Date.now()).toLocaleString("zh-CN"))}</span>
       </div>
-      <div class="inline-hint">${escapeHtml(new Date(project.updatedAt || project.createdAt || Date.now()).toLocaleString("zh-CN"))}</div>
     </div>
   `).join("");
 
@@ -1254,7 +1293,7 @@ function renderHistoryProjectsLegacy() {
   });
 
   el.historyProjectMeta.textContent = selectedProject
-    ? `${selectedProject.title || "未命名项目"} · ${selectedProject.themeName || "未命名主题"} · ${new Date(selectedProject.updatedAt || selectedProject.createdAt || Date.now()).toLocaleString("zh-CN")}`
+    ? `${selectedProject.title || "未命名项目"} · ${selectedProject.totalPages || 0} 页 · ${new Date(selectedProject.updatedAt || selectedProject.createdAt || Date.now()).toLocaleString("zh-CN")}`
     : "";
 
   const pageCards = Array.isArray(selectedProject?.pageSummaries) ? selectedProject.pageSummaries : [];
@@ -1271,6 +1310,11 @@ function renderHistoryProjectsLegacy() {
   if (el.restoreHistoryProjectBtn) {
     el.restoreHistoryProjectBtn.disabled = !snapshot;
   }
+  el.historyPageGrid.querySelectorAll("[data-history-image-src]").forEach((node) => {
+    node.addEventListener("click", () => {
+      openImageViewer(node.dataset.historyImageSrc || "", node.dataset.historyImageTitle || "历史生图");
+    });
+  });
 }
 
 function restoreHistoryProject() {
@@ -1330,13 +1374,15 @@ function renderHistoryPageImages(page, snapshot) {
   }
   return `
     <div class="history-image-stack">
-      <img class="history-image-primary" src="${escapeHtml(historyImages[0])}" alt="${escapeHtml(page.pageTitle || `第${page.pageNumber}页`)}" />
+      <img class="history-image-primary" src="${escapeHtml(historyImages[0])}" alt="${escapeHtml(page.pageTitle || `第${page.pageNumber}页`)}" data-history-image-src="${escapeHtml(historyImages[0])}" data-history-image-title="${escapeHtml(page.pageTitle || `第${page.pageNumber}页`)}" />
       <div class="history-image-thumbs">
         ${historyImages.map((src, index) => `
           <img
             src="${escapeHtml(src)}"
             alt="${escapeHtml(`${page.pageTitle || `第${page.pageNumber}页`} - ${index + 1}`)}"
             title="${escapeHtml(`第${index + 1}次生成`)}"
+            data-history-image-src="${escapeHtml(src)}"
+            data-history-image-title="${escapeHtml(`${page.pageTitle || `第${page.pageNumber}页`} - ${index + 1}`)}"
           />
         `).join("")}
       </div>
@@ -1368,10 +1414,8 @@ function renderHistoryProjects() {
     <div class="page-item history-project-item ${project.jobId === selectedProjectId ? "is-active" : ""}" data-history-project-id="${escapeHtml(project.jobId)}">
       <div class="history-project-title">
         <strong>${escapeHtml(project.title || "未命名项目")}</strong>
-        <span class="status-pill ${project.jobId === state.workflowJobId ? "generated" : "idle"}">${project.jobId === state.workflowJobId ? "当前项目" : "历史项目"}</span>
       </div>
       <div class="page-meta">
-        <span class="meta-pill">${escapeHtml(project.themeName || "未命名主题")}</span>
         <span class="meta-pill">${escapeHtml(`${project.totalPages || 0} 页`)}</span>
       </div>
       <div class="inline-hint">${escapeHtml(new Date(project.updatedAt || project.createdAt || Date.now()).toLocaleString("zh-CN"))}</div>
@@ -1387,7 +1431,7 @@ function renderHistoryProjects() {
   });
 
   el.historyProjectMeta.textContent = selectedProject
-    ? `${selectedProject.title || "未命名项目"} · ${selectedProject.themeName || "未命名主题"} · ${new Date(selectedProject.updatedAt || selectedProject.createdAt || Date.now()).toLocaleString("zh-CN")}`
+    ? `${selectedProject.title || "未命名项目"} · ${selectedProject.totalPages || 0} 页 · ${new Date(selectedProject.updatedAt || selectedProject.createdAt || Date.now()).toLocaleString("zh-CN")}`
     : "";
 
   const snapshotPages = Array.isArray(snapshot?.workflowJob?.pages) ? snapshot.workflowJob.pages : [];
@@ -1415,17 +1459,29 @@ function renderHistoryProjects() {
     }).join("")
     : `<div class="inline-hint">这个项目还没有页面快照。</div>`;
 
+  el.historyPageGrid.querySelectorAll("[data-history-image-src]").forEach((node) => {
+    node.addEventListener("click", () => {
+      openImageViewer(node.dataset.historyImageSrc, node.dataset.historyImageTitle || "历史生图");
+    });
+  });
+
   if (el.restoreHistoryProjectBtn) {
     el.restoreHistoryProjectBtn.disabled = !snapshot;
   }
 }
 
-function openCurrentPageLargeImage() {
-  const page = getSelectedPage();
-  if (!page?.baseImage || !el.pageImageModal || !el.pageImageModalImg) return;
-  el.pageImageModalImg.src = page.baseImage;
+function openImageViewer(src, title = "当前页大图") {
+  if (!src || !el.pageImageModal || !el.pageImageModalImg) return;
+  if (el.pageImageModalTitle) el.pageImageModalTitle.textContent = title || "当前页大图";
+  el.pageImageModalImg.src = src;
   el.pageImageModal.hidden = false;
   document.body.style.overflow = "hidden";
+}
+
+function openCurrentPageLargeImage() {
+  const page = getSelectedPage();
+  if (!page?.baseImage) return;
+  openImageViewer(page.baseImage, page.pageTitle || `第${page.pageNumber}页`);
 }
 
 function closeCurrentPageLargeImage() {
@@ -1433,6 +1489,35 @@ function closeCurrentPageLargeImage() {
   el.pageImageModal.hidden = true;
   el.pageImageModalImg.src = "";
   document.body.style.overflow = "";
+}
+
+function saveImageUrl(src, filename = "pptgen-image.png") {
+  const url = String(src || "").trim();
+  if (!url) {
+    setStatus("当前没有可另存的图片。", "error");
+    return;
+  }
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.target = "_blank";
+  anchor.rel = "noopener";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
+function saveCurrentPageImage() {
+  const page = getSelectedPage();
+  if (!page?.baseImage) {
+    setStatus("当前页还没有可另存的图片。", "error");
+    return;
+  }
+  saveImageUrl(page.baseImage, `pptgen_page_${page.pageNumber || 1}.png`);
+}
+
+function saveModalImage() {
+  saveImageUrl(el.pageImageModalImg?.src || "", "pptgen-image.png");
 }
 
 function buildWorkflowExportPayload() {
@@ -1892,6 +1977,7 @@ async function refreshServerConfig() {
       },
       workflowModels: data?.workflowModels || null,
     };
+    syncQuickKeyPlaceholders();
     syncCurrentPageGenerateUi();
   } catch (_error) {
     // Local env configuration is optional; keep UI usable if health probing fails.
@@ -2451,13 +2537,8 @@ function bindEvents() {
     saveState();
     syncCurrentPageGenerateUi();
   });
-  el.gptPageStylePrompt?.addEventListener("input", () => {
-    const page = getSelectedPage();
-    const draft = ensurePageDraft(page);
-    if (!draft) return;
-    draft.sharedPrompt = el.gptPageStylePrompt.value;
-    draft.pageStylePrompt = el.gptPageStylePrompt.value;
-    draft.extraPrompt = el.gptPageStylePrompt.value;
+  el.pageGlobalStylePrompt?.addEventListener("input", () => {
+    state.gptSharedStylePrompt = el.pageGlobalStylePrompt.value.trim();
     saveState();
     syncCurrentPageGenerateUi();
   });
@@ -2474,6 +2555,8 @@ function bindEvents() {
   el.modifyCurrentPageBtn?.addEventListener("click", modifyCurrentPage);
   el.copyPagePromptBtn?.addEventListener("click", copyCurrentPagePrompt);
   el.viewCurrentPageLargeBtn?.addEventListener("click", openCurrentPageLargeImage);
+  el.saveCurrentPageImageBtn?.addEventListener("click", saveCurrentPageImage);
+  el.slideBaseImage?.addEventListener("click", openCurrentPageLargeImage);
   el.exportWorkflowPptBtn?.addEventListener("click", exportWorkflowPpt);
   el.cancelGenerateCurrentPageBtn.addEventListener("click", () => {
     const page = getSelectedPage();
@@ -2482,6 +2565,7 @@ function bindEvents() {
   });
   el.restoreHistoryProjectBtn?.addEventListener("click", restoreHistoryProject);
   el.closePageImageModalBtn?.addEventListener("click", closeCurrentPageLargeImage);
+  el.savePageImageModalBtn?.addEventListener("click", saveModalImage);
   document.querySelectorAll("[data-close-page-image-modal]").forEach((node) => {
     node.addEventListener("click", closeCurrentPageLargeImage);
   });
@@ -2631,7 +2715,12 @@ function renderPageResults() {
 
   el.pageResultStrip.querySelectorAll("[data-result-image-src]").forEach((node) => {
     node.addEventListener("click", () => {
-      page.baseImage = node.dataset.resultImageSrc || page.baseImage;
+      const nextSrc = node.dataset.resultImageSrc || page.baseImage;
+      if (nextSrc === page.baseImage) {
+        openImageViewer(nextSrc, page.pageTitle || `第${page.pageNumber}页`);
+        return;
+      }
+      page.baseImage = nextSrc;
       saveState();
       renderPagesWorkbench();
     });
@@ -2671,11 +2760,10 @@ async function skipSplit() {
     readyToGeneratePages: 0,
     failedPages: 0,
     pages: [],
-    statusText: "正在创建手工项目...",
+    statusText: "",
   };
   state.selectedPageId = "";
   renderPagesWorkbench();
-  setStatus("正在创建手工项目...", "running");
   try {
     const data = await apiJson("/api/workflow/manual-job", {
       method: "POST",
@@ -2911,6 +2999,7 @@ function renderPageList() {
 
   el.workflowPageList.querySelectorAll("[data-page-id]").forEach((item) => {
     item.addEventListener("click", () => {
+      updateCurrentPageDraftFromEditors();
       state.selectedPageId = item.dataset.pageId;
       renderPagesWorkbench();
       saveState();
@@ -3125,6 +3214,12 @@ function updateCurrentPageDraftFromEditors() {
   draft.onscreenTitle = title;
   draft.onscreenBody = body;
   draft.onscreenContent = composeOnscreenContentFromEditors(title, body);
+  if (page) {
+    page.pageTitle = title || page.pageTitle || `第 ${page.pageNumber || ""} 页`;
+    page.pageContent = formatOnscreenPreview(body);
+    page.onscreenContent = draft.onscreenContent;
+    page.onscreenContentText = draft.onscreenContent;
+  }
   return draft.onscreenContent;
 }
 
@@ -3133,6 +3228,7 @@ function attachEnhancedPageEditorEvents() {
   if (el.pageOnscreenTitleEditor && !el.pageOnscreenTitleEditor.dataset.boundEnhanced) {
     el.pageOnscreenTitleEditor.addEventListener("input", () => {
       updateCurrentPageDraftFromEditors();
+      renderPageList();
       saveState();
     });
     el.pageOnscreenTitleEditor.dataset.boundEnhanced = "true";
@@ -3140,6 +3236,7 @@ function attachEnhancedPageEditorEvents() {
   if (el.pageOnscreenBodyEditor && !el.pageOnscreenBodyEditor.dataset.boundEnhanced) {
     el.pageOnscreenBodyEditor.addEventListener("input", () => {
       updateCurrentPageDraftFromEditors();
+      renderPageList();
       saveState();
     });
     el.pageOnscreenBodyEditor.dataset.boundEnhanced = "true";
@@ -3178,6 +3275,9 @@ function syncCurrentPageGenerateUi() {
   el.cancelGenerateCurrentPageBtn.disabled = !pageActive;
   if (el.viewCurrentPageLargeBtn) {
     el.viewCurrentPageLargeBtn.disabled = !page?.baseImage || pageActive;
+  }
+  if (el.saveCurrentPageImageBtn) {
+    el.saveCurrentPageImageBtn.disabled = !page?.baseImage || pageActive;
   }
   if (el.copyPagePromptBtn) {
     el.copyPagePromptBtn.disabled = !page || pageActive || !themeReady;
@@ -3274,6 +3374,7 @@ function upgradeSmartUiLayout() {
       el.pageOnscreenBodyEditor.rows = 14;
       el.pageOnscreenBodyEditor.placeholder = "\u8fd9\u4e00\u9875\u7684\u4e3b\u8981\u4e0a\u5c4f\u6587\u5b57";
     }
+    attachEnhancedPageEditorEvents();
   }
 
   const artboardToolbar = pagesStage?.querySelector(".artboard-toolbar");
@@ -3337,16 +3438,17 @@ function renderPagesWorkbench() {
   renderPageList();
   const page = getSelectedPage();
   if (!page) {
-    el.pageMetaHint.textContent = state.workflowJob?.statusText || "";
+    el.pageMetaHint.textContent = "";
     if (el.pageOnscreenTitleEditor) el.pageOnscreenTitleEditor.value = "";
     if (el.pageOnscreenBodyEditor) el.pageOnscreenBodyEditor.value = "";
     if (el.pageOnscreenEditor) el.pageOnscreenEditor.value = "";
-    if (el.gptPageStylePrompt) el.gptPageStylePrompt.value = "";
-    if (el.gptPageStyleField) el.gptPageStyleField.hidden = true;
+    if (el.pageGlobalStylePrompt) el.pageGlobalStylePrompt.value = state.gptSharedStylePrompt || "";
+    if (el.pageGlobalStylePromptField) el.pageGlobalStylePromptField.hidden = !usingGptSimpleWorkflow();
     if (el.pageExtraPromptField) el.pageExtraPromptField.hidden = false;
     el.pageExtraPrompt.value = "";
     el.pagePromptTrace.textContent = "";
     if (el.viewCurrentPageLargeBtn) el.viewCurrentPageLargeBtn.disabled = true;
+    if (el.saveCurrentPageImageBtn) el.saveCurrentPageImageBtn.disabled = true;
     if (el.copyPagePromptBtn) el.copyPagePromptBtn.disabled = true;
     renderArtboard();
     renderPageResults();
@@ -3363,16 +3465,19 @@ function renderPagesWorkbench() {
   el.pageMetaHint.textContent = page.riskReason
     ? `\u7b2c${page.pageNumber}\u9875 \u00b7 ${page.pageTitle} \u00b7 \u6392\u7248\u98ce\u9669`
     : `\u7b2c${page.pageNumber}\u9875 \u00b7 ${page.pageTitle}`;
+  if (el.pageGlobalStylePrompt) el.pageGlobalStylePrompt.value = state.gptSharedStylePrompt || "";
+  if (el.pageGlobalStylePromptField) el.pageGlobalStylePromptField.hidden = !usingGptSimpleWorkflow();
   if (el.pageOnscreenTitleEditor) el.pageOnscreenTitleEditor.value = draft.onscreenTitle;
   if (el.pageOnscreenBodyEditor) el.pageOnscreenBodyEditor.value = draft.onscreenBody;
   if (el.pageOnscreenPreview) el.pageOnscreenPreview.innerHTML = "";
-  if (el.gptPageStyleField) el.gptPageStyleField.hidden = true;
   if (el.pageExtraPromptField) el.pageExtraPromptField.hidden = false;
-  if (el.gptPageStylePrompt) el.gptPageStylePrompt.value = "";
   el.pageExtraPrompt.value = draft.sharedPrompt || draft.extraPrompt || draft.pageStylePrompt || "";
   el.pagePromptTrace.textContent = stringifyTrace(page.promptTrace);
   if (el.viewCurrentPageLargeBtn) {
     el.viewCurrentPageLargeBtn.disabled = !page.baseImage || isPageGenerating(page.id);
+  }
+  if (el.saveCurrentPageImageBtn) {
+    el.saveCurrentPageImageBtn.disabled = !page.baseImage || isPageGenerating(page.id);
   }
   renderArtboard();
   renderPageResults(page);
@@ -3408,6 +3513,7 @@ async function submitCurrentPageReprepare(options = {}) {
         region: state.settings.region,
         jobId: state.workflowJobId,
         pageId: page.id,
+        pageTitle: draft.onscreenTitle || page.pageTitle || "",
         onscreenContent: draft.onscreenContent,
         autoExpandToMaxChars,
       }),
@@ -3454,11 +3560,12 @@ async function copyCurrentPagePrompt() {
   const draft = ensurePageDraft(page);
   draft.sharedPrompt = getCurrentSharedPromptValue();
   draft.extraPrompt = draft.sharedPrompt;
-  draft.pageStylePrompt = draft.sharedPrompt;
+  draft.pageStylePrompt = getEffectivePageStylePrompt(draft.sharedPrompt);
   draft.onscreenContent = updateCurrentPageDraftFromEditors();
   const promptTrace = page.promptTrace?.finalImage || null;
   const pageContent = String(page.onscreenContentText || page.onscreenContent || page.pageContent || "").trim();
   const promptIsCurrent = Boolean(promptTrace?.prompt)
+    && String(promptTrace.pageTitle || "").trim() === String(draft.onscreenTitle || page.pageTitle || "").trim()
     && String(promptTrace.extraPrompt || "").trim() === draft.extraPrompt
     && String(promptTrace.pageStylePrompt || "").trim() === draft.pageStylePrompt
     && pageContent === String(draft.onscreenContent || "").trim();
@@ -3484,6 +3591,7 @@ async function copyCurrentPagePrompt() {
           imageModel: getCurrentWorkflowImageModel(),
           jobId: state.workflowJob?.id,
           pageId: page.id,
+          pageTitle: draft.onscreenTitle || page.pageTitle || "",
           sharedPrompt: draft.sharedPrompt,
           extraPrompt: draft.extraPrompt,
           pageStylePrompt: draft.pageStylePrompt,
@@ -3544,7 +3652,7 @@ async function generateCurrentPage() {
   const draft = ensurePageDraft(page);
   draft.sharedPrompt = getCurrentSharedPromptValue();
   draft.extraPrompt = draft.sharedPrompt;
-  draft.pageStylePrompt = draft.sharedPrompt;
+  draft.pageStylePrompt = getEffectivePageStylePrompt(draft.sharedPrompt);
   draft.onscreenContent = updateCurrentPageDraftFromEditors();
   const requestKey = getPageGenerateRequestKey(page.id);
   const signal = startCancelableAction(requestKey, el.generateCurrentPageBtn, el.cancelGenerateCurrentPageBtn, page?.generated ? "重新生成中..." : "生成中...");
@@ -3574,6 +3682,7 @@ async function generateCurrentPage() {
         imageModel: selectedImageModel,
         jobId: state.workflowJobId,
         pageId: page.id,
+        pageTitle: draft.onscreenTitle || page.pageTitle || "",
         slideAspect: state.settings.slideAspect,
         size: getWorkflowGenerationSize(),
         seed: state.settings.seed,
@@ -3616,8 +3725,10 @@ async function modifyCurrentPage() {
   if (!page) return;
   const draft = ensurePageDraft(page);
   draft.sharedPrompt = getCurrentSharedPromptValue();
-  draft.extraPrompt = draft.sharedPrompt;
-  draft.pageStylePrompt = draft.sharedPrompt;
+  draft.extraPrompt = appendDrawingRemovalInstruction(draft.sharedPrompt, true);
+  draft.pageStylePrompt = usingGptSimpleWorkflow()
+    ? composeGptPageStylePrompt(draft.extraPrompt)
+    : draft.extraPrompt;
   draft.onscreenContent = updateCurrentPageDraftFromEditors();
   if (!draft.sharedPrompt) {
     setStatus("请先填写该页提示词，再按要求修改。", "error");
@@ -3664,6 +3775,7 @@ async function modifyCurrentPage() {
         imageModel: selectedImageModel,
         jobId: state.workflowJobId,
         pageId: page.id,
+        pageTitle: draft.onscreenTitle || page.pageTitle || "",
         slideAspect: state.settings.slideAspect,
         size: getWorkflowGenerationSize(),
         seed: state.settings.seed,
