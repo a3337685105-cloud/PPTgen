@@ -507,6 +507,7 @@ function installWorkflowRoutes(app, deps) {
   const {
     resolveRegion,
     parseJsonResponse,
+    requestJsonViaFetch,
     requestGeminiJson,
     requestGrsaiGenerate,
     requestOpenAiImageGenerate,
@@ -523,16 +524,21 @@ function installWorkflowRoutes(app, deps) {
     loadReferenceAssetAsDataUrl,
   } = deps;
 
+  const requestJson = requestJsonViaFetch || (async ({ url, method = "POST", headers = {}, body }) => {
+    const response = await fetch(url, { method, headers, body });
+    return parseJsonResponse(response);
+  });
+
   async function callAssistant(apiKey, region, payload) {
-    const response = await fetch(`${resolveRegion(region || DEFAULT_REGION)}/api/v1/services/aigc/multimodal-generation/generation`, {
+    const parsed = await requestJson({
       method: "POST",
+      url: `${resolveRegion(region || DEFAULT_REGION)}/api/v1/services/aigc/multimodal-generation/generation`,
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify(payload),
     });
-    const parsed = await parseJsonResponse(response);
     if (!parsed.ok || parsed.data?.code) {
       throw new Error(parsed.data?.message || "Qwen 调用失败。");
     }
@@ -553,15 +559,15 @@ function installWorkflowRoutes(app, deps) {
     if (Number.isFinite(Number(temperature))) {
       body.temperature = Number(temperature);
     }
-    const response = await fetch(buildChatCompletionsUrl(region || DEFAULT_REGION), {
+    const parsed = await requestJson({
       method: "POST",
+      url: buildChatCompletionsUrl(region || DEFAULT_REGION),
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify(body),
     });
-    const parsed = await parseJsonResponse(response);
     if (!parsed.ok || parsed.data?.code || parsed.data?.error) {
       throw new Error(parsed.data?.error?.message || parsed.data?.message || "Qwen compatible chat 调用失败。");
     }
@@ -685,8 +691,9 @@ function installWorkflowRoutes(app, deps) {
   }
 
   async function repairResearchOutputAsJson({ apiKey, region, rawText }) {
-    const response = await fetch(buildChatCompletionsUrl(region), {
+    const parsed = await requestJson({
       method: "POST",
+      url: buildChatCompletionsUrl(region),
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
@@ -757,8 +764,6 @@ function installWorkflowRoutes(app, deps) {
         stream: false,
       }),
     });
-
-    const parsed = await parseJsonResponse(response);
     if (!parsed.ok) {
       return {
         ok: false,
@@ -810,8 +815,9 @@ function installWorkflowRoutes(app, deps) {
       referenceDigest?.usableFacts?.length ? `reference_facts:\n${referenceDigest.usableFacts.slice(0, 12).join("\n")}` : "",
     ].filter(Boolean).join("\n");
 
-    const response = await fetch(buildResponsesUrl(region), {
+    const parsed = await requestJson({
       method: "POST",
+      url: buildResponsesUrl(region),
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
@@ -823,8 +829,6 @@ function installWorkflowRoutes(app, deps) {
         enable_thinking: false,
       }),
     });
-
-    const parsed = await parseJsonResponse(response);
     if (!parsed.ok) {
       throw new Error(parsed.data?.message || "联网扩写检索失败。");
     }
@@ -2586,16 +2590,15 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
           dashscopePayload.parameters.seed = Number(seed);
         }
 
-        const response = await fetch(`${resolveRegion(region || DEFAULT_REGION)}/api/v1/services/aigc/multimodal-generation/generation`, {
+        const parsed = await requestJson({
           method: "POST",
+          url: `${resolveRegion(region || DEFAULT_REGION)}/api/v1/services/aigc/multimodal-generation/generation`,
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${effectiveApiKey}`,
           },
           body: JSON.stringify(dashscopePayload),
         });
-
-        const parsed = await parseJsonResponse(response);
         if (!parsed.ok || parsed.data?.code) {
           return res.status(parsed.status || 500).json({
             code: "WorkflowPageGenerateFailed",

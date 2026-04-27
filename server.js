@@ -9,6 +9,7 @@ if (typeof Path2D === "undefined") {
 }
 
 const crypto = require("crypto");
+const { spawn } = require("child_process");
 const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
@@ -25,7 +26,7 @@ const PORT = process.env.PORT || 3000;
 let ACTIVE_PORT = Number(PORT);
 const ROOT_DIR = __dirname;
 const PUBLIC_DIR = path.join(ROOT_DIR, "public");
-const RUNTIME_DIR = process.pkg ? path.dirname(process.execPath) : __dirname;
+const RUNTIME_DIR = process.env.PPTGEN_RUNTIME_DIR || (process.pkg ? path.dirname(process.execPath) : __dirname);
 const GENERATED_DIR = path.join(RUNTIME_DIR, "generated-images");
 const EXPORTS_DIR = path.join(RUNTIME_DIR, "exports");
 const DATA_DIR = path.join(RUNTIME_DIR, "data");
@@ -65,6 +66,7 @@ const OPENAI_IMAGE_MODELS = new Set([
   "gpt-image-2",
 ]);
 const SUPPORTED_GEMINI_ASPECTS = new Set(["1:1", "4:3", "16:9", "3:4", "9:16"]);
+const POWERSHELL_HTTP_TIMEOUT_SEC = clampNumber(process.env.PPTGEN_HTTP_TIMEOUT_SEC, 180, 10, 600);
 
 fs.mkdirSync(GENERATED_DIR, { recursive: true });
 fs.mkdirSync(EXPORTS_DIR, { recursive: true });
@@ -476,13 +478,127 @@ function buildOpenAiImageGenerationsUrl(baseUrl) {
   return resolveOpenAiImageEndpoint(baseUrl);
 }
 
-async function requestJsonViaFetch({ url, method = "POST", headers = {}, body }) {
-  const response = await fetch(url, {
-    method,
-    headers,
-    body,
+function shouldUsePowerShellHttpFallback(error) {
+  if (process.platform !== "win32") return false;
+  const message = String(error?.message || "");
+  const causeMessage = String(error?.cause?.message || "");
+  const errorCode = String(error?.code || error?.cause?.code || "");
+  return [
+    /fetch failed/i.test(message),
+    /secure TLS connection/i.test(causeMessage),
+    /ssl|tls/i.test(causeMessage),
+    /socket disconnected/i.test(causeMessage),
+    ["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "UND_ERR_CONNECT_TIMEOUT"].includes(errorCode),
+  ].some(Boolean);
+}
+
+async function requestJsonViaPowerShell({ url, method = "POST", headers = {}, body }) {
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "$request = ([Console]::In.ReadToEnd() | ConvertFrom-Json)",
+    "$headers = @{}",
+    "$contentType = $null",
+    "if ($null -ne $request.headers) {",
+    "  $request.headers.PSObject.Properties | ForEach-Object {",
+    "    if ($_.Name -ieq 'Content-Type') { $contentType = [string]$_.Value }",
+    "    else { $headers[$_.Name] = [string]$_.Value }",
+    "  }",
+    "}",
+    `$params = @{ Uri = [string]$request.url; Method = [string]$request.method; UseBasicParsing = $true; TimeoutSec = ${POWERSHELL_HTTP_TIMEOUT_SEC}; Headers = $headers }`,
+    "if ($contentType) { $params['ContentType'] = $contentType }",
+    "if ($null -ne $request.body -and [string]$request.body -ne '') { $params['Body'] = [string]$request.body }",
+    "$statusCode = 0",
+    "$content = ''",
+    "try {",
+    "  $response = Invoke-WebRequest @params",
+    "  $statusCode = [int]$response.StatusCode",
+    "  $content = [string]$response.Content",
+    "} catch {",
+    "  if ($_.Exception.Response) {",
+    "    $resp = $_.Exception.Response",
+    "    $statusCode = [int]$resp.StatusCode",
+    "    $reader = New-Object System.IO.StreamReader($resp.GetResponseStream())",
+    "    $content = $reader.ReadToEnd()",
+    "    $reader.Close()",
+    "  } else {",
+    "    throw",
+    "  }",
+    "}",
+    "$result = @{ ok = ($statusCode -ge 200 -and $statusCode -lt 300); status = $statusCode; text = $content }",
+    "[Console]::Out.Write(($result | ConvertTo-Json -Compress -Depth 8))",
+  ].join("\n");
+
+  const payload = JSON.stringify({ url, method, headers, body });
+  const raw = await new Promise((resolve, reject) => {
+    const child = spawn("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      script,
+    ], {
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code !== 0 && !stdout.trim()) {
+        return reject(new Error(stderr.trim() || `PowerShell HTTP fallback exited with code ${code}.`));
+      }
+      try {
+        resolve(JSON.parse(stdout));
+      } catch {
+        reject(new Error(`PowerShell HTTP fallback returned invalid JSON: ${stderr.trim() || stdout.slice(0, 300)}`));
+      }
+    });
+
+    child.stdin.end(payload);
   });
-  return parseJsonResponse(response);
+
+  const text = typeof raw?.text === "string" ? raw.text : "";
+  try {
+    return {
+      ok: Boolean(raw?.ok),
+      status: Number(raw?.status) || 500,
+      data: JSON.parse(text),
+    };
+  } catch {
+    return {
+      ok: Boolean(raw?.ok),
+      status: Number(raw?.status) || 500,
+      data: {
+        code: "InvalidJSON",
+        message: text || "Upstream returned a non-JSON response.",
+      },
+    };
+  }
+}
+
+async function requestJsonViaFetch({ url, method = "POST", headers = {}, body }) {
+  try {
+    const response = await fetch(url, {
+      method,
+      headers,
+      body,
+    });
+    return parseJsonResponse(response);
+  } catch (error) {
+    if (!shouldUsePowerShellHttpFallback(error)) {
+      throw error;
+    }
+    return requestJsonViaPowerShell({ url, method, headers, body });
+  }
 }
 
 async function requestGeminiJson(request) {
@@ -1222,8 +1338,9 @@ function extractResponsesError(data) {
 }
 
 async function repairResearchOutputAsJson({ apiKey, region, rawText }) {
-  const response = await fetch(buildChatCompletionsUrl(region), {
+  const parsed = await requestJsonViaFetch({
     method: "POST",
+    url: buildChatCompletionsUrl(region),
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
@@ -1294,8 +1411,6 @@ async function repairResearchOutputAsJson({ apiKey, region, rawText }) {
       stream: false,
     }),
   });
-
-  const parsed = await parseJsonResponse(response);
   if (!parsed.ok) {
     return {
       ok: false,
@@ -1327,8 +1442,9 @@ async function repairResearchOutputAsJson({ apiKey, region, rawText }) {
 }
 
 async function generateResearchSearchQuery({ apiKey, region, pageType, pageTitle, pageContent, themeLabel, visibleTextBlock }) {
-  const response = await fetch(buildChatCompletionsUrl(region), {
+  const parsed = await requestJsonViaFetch({
     method: "POST",
+    url: buildChatCompletionsUrl(region),
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
@@ -1378,8 +1494,6 @@ async function generateResearchSearchQuery({ apiKey, region, pageType, pageTitle
       stream: false,
     }),
   });
-
-  const parsed = await parseJsonResponse(response);
   if (!parsed.ok) {
     return "";
   }
@@ -1481,6 +1595,7 @@ installWorkflowRoutes(app, {
   resolveGeminiApiKey,
   resolveOpenAiImageApiKey,
   parseJsonResponse,
+  requestJsonViaFetch,
   requestGeminiJson,
   requestGrsaiGenerate,
   requestOpenAiImageGenerate,
@@ -1593,8 +1708,9 @@ app.post("/api/test-image-key", async (req, res) => {
   }
 
   try {
-    const response = await fetch(buildChatCompletionsUrl(region), {
+    const parsed = await requestJsonViaFetch({
       method: "POST",
+      url: buildChatCompletionsUrl(region),
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${effectiveApiKey}`,
@@ -1607,8 +1723,6 @@ app.post("/api/test-image-key", async (req, res) => {
         stream: false,
       }),
     });
-
-    const parsed = await parseJsonResponse(response);
     if (!parsed.ok) {
       return res.status(parsed.status).json(parsed.data);
     }
@@ -1747,13 +1861,12 @@ app.post("/api/generate", async (req, res) => {
       headers["X-DashScope-Async"] = "enable";
     }
 
-    const response = await fetch(buildGenerationUrl(region, asyncMode), {
+    const parsed = await requestJsonViaFetch({
       method: "POST",
+      url: buildGenerationUrl(region, asyncMode),
       headers,
       body: JSON.stringify(payload),
     });
-
-    const parsed = await parseJsonResponse(response);
     return res.status(parsed.status).json(parsed.data);
   } catch (error) {
     return res.status(500).json({
@@ -1775,14 +1888,13 @@ app.post("/api/tasks/fetch", async (req, res) => {
   }
 
   try {
-    const response = await fetch(buildTaskUrl(region, taskId), {
+    const parsed = await requestJsonViaFetch({
       method: "GET",
+      url: buildTaskUrl(region, taskId),
       headers: {
         Authorization: `Bearer ${effectiveApiKey}`,
       },
     });
-
-    const parsed = await parseJsonResponse(response);
     return res.status(parsed.status).json(parsed.data);
   } catch (error) {
     return res.status(500).json({
@@ -1811,16 +1923,15 @@ app.post("/api/assistant", async (req, res) => {
   }
 
   try {
-    const response = await fetch(buildMultimodalUrl(region), {
+    const parsed = await requestJsonViaFetch({
       method: "POST",
+      url: buildMultimodalUrl(region),
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${effectiveApiKey}`,
       },
       body: JSON.stringify(payload),
     });
-
-    const parsed = await parseJsonResponse(response);
     return res.status(parsed.status).json(parsed.data);
   } catch (error) {
     return res.status(500).json({
@@ -1892,8 +2003,9 @@ app.post("/api/research-supplements", async (req, res) => {
   ].filter(Boolean).join("\n");
 
   try {
-    const response = await fetch(buildResponsesUrl(region), {
+    const parsed = await requestJsonViaFetch({
       method: "POST",
+      url: buildResponsesUrl(region),
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${effectiveApiKey}`,
@@ -1907,8 +2019,6 @@ app.post("/api/research-supplements", async (req, res) => {
         enable_thinking: false,
       }),
     });
-
-    const parsed = await parseJsonResponse(response);
     if (!parsed.ok) {
       return res.status(parsed.status).json(parsed.data);
     }
@@ -2267,34 +2377,59 @@ app.post("/api/export-workflow-ppt", async (req, res) => {
     });
   }
 });
-function startServer(port) {
-  const server = app.listen(port, () => {
-    ACTIVE_PORT = Number(port);
-    const url = `http://localhost:${port}`;
-    console.log(`Nano Banana PPT Studio is running at ${url}`);
-    console.log(`Generated images will be saved to ${GENERATED_DIR}`);
-    if (process.pkg) {
-      const { exec } = require("child_process");
-      const cmd = process.platform === "win32"
-        ? `start "" "${url}"`
-        : process.platform === "darwin"
-          ? `open "${url}"`
-          : `xdg-open "${url}"`;
-      exec(cmd, () => {});
-    }
-  });
+function openInDefaultBrowser(url) {
+  const { exec } = require("child_process");
+  const cmd = process.platform === "win32"
+    ? `start "" "${url}"`
+    : process.platform === "darwin"
+      ? `open "${url}"`
+      : `xdg-open "${url}"`;
+  exec(cmd, () => {});
+}
 
-  server.on("error", (error) => {
-    if (error?.code === "EADDRINUSE") {
-      const nextPort = Number(port) + 1;
-      console.warn(`Port ${port} is in use. Retrying on ${nextPort}...`);
-      startServer(nextPort);
-      return;
-    }
-    throw error;
+function startServer(port, options = {}) {
+  const requestedPort = Number(port) || 3000;
+  const openBrowser = options.openBrowser ?? (process.pkg && process.env.PPTGEN_NO_BROWSER !== "1");
+
+  return new Promise((resolve, reject) => {
+    const server = app.listen(requestedPort, () => {
+      ACTIVE_PORT = Number(requestedPort);
+      const url = `http://localhost:${requestedPort}`;
+      console.log(`PPTGEN is running at ${url}`);
+      console.log(`Generated images will be saved to ${GENERATED_DIR}`);
+      if (openBrowser) openInDefaultBrowser(url);
+      resolve({ app, server, port: requestedPort, url });
+    });
+
+    server.on("error", (error) => {
+      if (error?.code === "EADDRINUSE") {
+        const nextPort = requestedPort + 1;
+        console.warn(`Port ${requestedPort} is in use. Retrying on ${nextPort}...`);
+        startServer(nextPort, options).then(resolve, reject);
+        return;
+      }
+      reject(error);
+    });
   });
 }
 
-startServer(Number(PORT) || 3000);
+function clampNumber(value, fallback, min, max) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(max, Math.max(min, numeric));
+}
+
+if (require.main === module) {
+  startServer(Number(PORT) || 3000).catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  app,
+  startServer,
+  getActivePort: () => ACTIVE_PORT,
+};
 
 

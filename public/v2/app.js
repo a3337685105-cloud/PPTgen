@@ -1,6 +1,6 @@
 const STORAGE_KEY = "ppt-studio-v2-mainline";
 const DEFAULT_REGION = "beijing";
-const PPT_MODEL = "nano-banana-2";
+const PPT_MODEL = "gpt-image-2";
 const GEMINI_WORKFLOW_MODELS = new Set([
   "gemini-3.1-flash-image-preview",
   "gemini-3-pro-image-preview",
@@ -156,7 +156,7 @@ const state = {
   workflowProjectSnapshots: {},
   selectedHistoryProjectId: "",
   pageDrawing: {
-    tool: "pen",
+    tool: "",
     color: "#22d3ee",
     width: 6,
     active: false,
@@ -856,14 +856,9 @@ function getCurrentHostedImageKeyPayload() {
 }
 
 const WORKFLOW_IMAGE_MODEL_OPTIONS = [
-    `<option value="nano-banana-2">Grsai Nano Banana 2</option>`,
-    `<option value="nano-banana-pro">Grsai Nano Banana Pro</option>`,
-    `<option value="gemini-3.1-pro">Grsai Gemini 3.1 Pro</option>`,
-    `<option value="gpt-image-2">OpenAI GPT Image 2</option>`,
-    `<option value="gemini-3.1-flash-image-preview">Nano Banana 2</option>`,
-    `<option value="gemini-3-pro-image-preview">Nano Banana Pro</option>`,
-    `<option value="gemini-2.5-flash-image">Nano Banana</option>`,
-    `<option value="wan2.7-image-pro">Wan 2.7</option>`,
+    `<option value="gpt-image-2">GPT Image 2</option>`,
+    `<option value="nano-banana-2">NanoBanana 2</option>`,
+    `<option value="nano-banana-pro">NanoBanana Pro</option>`,
 ];
 
 function getWorkflowModelSelects() {
@@ -917,7 +912,7 @@ function syncQuickKeyPlaceholders() {
   };
   setPlaceholder(el.quickApiKey, "用于内容拆分和风格匹配", ck.dashscope);
   setPlaceholder(el.quickGoogleApiKey, "用于 Gemini 生图", ck.gemini);
-  setPlaceholder(el.quickGrsaiApiKey, "用于 Grsai Nano Banana / Gemini 3.1 Pro", ck.grsai);
+  setPlaceholder(el.quickGrsaiApiKey, "用于 NanoBanana 2 / NanoBanana Pro", ck.grsai);
   setPlaceholder(el.quickOpenAiImageApiKey, "用于 gpt-image-2", ck.openAiImage);
 }
 
@@ -1698,9 +1693,10 @@ function renderPageDrawingLayer() {
 
 function updatePageDrawToolbar() {
   if (!el.pageDrawPenBtn || !el.pageDrawRectBtn) return;
-  const tool = state.pageDrawing?.tool || "pen";
+  const tool = state.pageDrawing?.tool || "";
   el.pageDrawPenBtn.classList.toggle("is-active", tool === "pen");
   el.pageDrawRectBtn.classList.toggle("is-active", tool === "rect");
+  el.pageDrawCanvas?.classList.toggle("is-drawing-enabled", Boolean(tool));
   if (el.pageDrawColorInput && state.pageDrawing?.color) {
     el.pageDrawColorInput.value = state.pageDrawing.color;
   }
@@ -1756,6 +1752,8 @@ function setupPageDrawingInteractions() {
 
   const pointerDown = (event) => {
     if (event.button !== 0) return;
+    const tool = drawingState.tool || "";
+    if (!tool) return;
     const page = getSelectedPage();
     if (!page) return;
     resizePageDrawCanvas(false);
@@ -1767,7 +1765,7 @@ function setupPageDrawingInteractions() {
     drawingState.startX = point.x;
     drawingState.startY = point.y;
     drawingState.snapshot = ctx.getImageData(0, 0, el.pageDrawCanvas.width, el.pageDrawCanvas.height);
-    if ((drawingState.tool || "pen") === "pen") {
+    if (tool === "pen") {
       applyStrokeStyle(ctx);
       ctx.beginPath();
       ctx.moveTo(point.x, point.y);
@@ -1780,7 +1778,8 @@ function setupPageDrawingInteractions() {
     const point = getPoint(event);
     const ctx = getCtx();
     if (!point || !ctx) return;
-    const tool = drawingState.tool || "pen";
+    const tool = drawingState.tool || "";
+    if (!tool) return;
     if (tool === "pen") {
       applyStrokeStyle(ctx);
       ctx.lineTo(point.x, point.y);
@@ -1814,11 +1813,13 @@ function setupPageDrawingInteractions() {
   el.pageDrawCanvas.addEventListener("pointerup", pointerUp);
   el.pageDrawCanvas.addEventListener("pointerleave", pointerUp);
   el.pageDrawPenBtn?.addEventListener("click", () => {
-    state.pageDrawing.tool = "pen";
+    state.pageDrawing.tool = state.pageDrawing.tool === "pen" ? "" : "pen";
+    saveState();
     updatePageDrawToolbar();
   });
   el.pageDrawRectBtn?.addEventListener("click", () => {
-    state.pageDrawing.tool = "rect";
+    state.pageDrawing.tool = state.pageDrawing.tool === "rect" ? "" : "rect";
+    saveState();
     updatePageDrawToolbar();
   });
   el.clearPageDrawingBtn?.addEventListener("click", clearPageDrawingLayer);
