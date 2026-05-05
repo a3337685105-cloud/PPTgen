@@ -22,13 +22,6 @@ const WORKFLOW_FIXED_PROMPT = [
   "你是一位国际一流的学术PPT设计大师，杂志编辑风/平面设计大师，红点设计奖，精通从内容提炼、逻辑梳理、排版设计到配图的全流程PPT设计。",
   "根据以上内容设计一页PPT。要求内部逻辑清晰、重点突出。字体采用相应字体，按照需要加粗或艺术化，一页不超两种字体。标题与正文字体大小越1:0.618，黄金比例。对比度足够，确保易读性。视觉效果通透美观。你擅长为内容配图，搭配的图片中，照片真实，测试结果图片准确无误，说明图简洁凝练清晰。",
 ].join("\n");
-const CONSTANTS_RULES = [
-  "整份演示遵循对比、重复、对齐、亲密四项排版原则。",
-  "文字区保持清晰底色、稳定对比和明确层级。",
-  "装饰、材质和背景纹理服务阅读节奏，阅读区保持干净。",
-  "每页使用统一网格、精确对齐和清晰分组。",
-].join(" ");
-
 const PAGE_TYPE_LABELS = {
   cover: "封面页",
   catalog: "目录页",
@@ -136,7 +129,9 @@ function stringifyStructuredField(value) {
   return "";
 }
 
-function normalizeOnscreenContent(value) {
+// Dead code removed: first normalizeOnscreenContent definition (lines 139-357)
+// was overridden by the second definition at line 465
+function _normalizeOnscreenContentDead(value) {
   const normalizeKey = (input) => String(input || "").replace(/[\s_-]+/g, "").toLowerCase();
   const wrapperKeys = new Set(["blocks", "items", "points", "entries", "sections", "visualelements", "datapoints"]);
   const hiddenKeys = new Set(["type", "highlight", "index", "order", "sort", "priority"]);
@@ -1269,7 +1264,7 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
           referenceDigest: options.referenceTrace || null,
           splitPlan: options.splitTrace || null,
           expansionPlan: options.expansionTrace || null,
-          lengthControlPlan: options.expansionTrace || null,
+          lengthControlTrace: options.lengthControlTrace || null,
         },
       pages,
       errors: [],
@@ -1651,52 +1646,11 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
     const wordCount = Number(page?.estimatedChars || page?.word_count || countCharacters(cleanOnscreenContent));
     const density = wordCount <= 60 ? "low" : wordCount <= 140 ? "medium" : wordCount <= 240 ? "high" : "very-high";
     const type = ["cover", "catalog", "chapter", "content", "data"].includes(pageType) ? pageType : "content";
-    const table = {
-      cover: {
-        layout: "海报式封面版式，单一主标题区，单一视觉焦点，充足留白",
-        text: "大标题、短副标题和少量辅助信息形成清晰层级",
-      },
-      catalog: {
-        layout: "结构化议程网格，编号形成稳定节奏，章节导航清晰",
-        text: "短章节名、编号和说明文字保持统一对齐与间距",
-      },
-      chapter: {
-        layout: "章节分隔版式，大号章节序号，明确材质色块",
-        text: "一个章节标题搭配一句简短过渡说明",
-      },
-      data: {
-        layout: density === "high" || density === "very-high"
-          ? "高密度数据网格，清晰图表容器，信息严格对齐"
-          : "单一核心图表英雄区，注释区位置精确",
-        text: "关键数字和结论优先呈现，坐标轴、图例和注释清晰可读",
-      },
-      content: {
-        layout: density === "low"
-          ? "编辑型重点版式，一个核心观点搭配支撑视觉隐喻"
-          : density === "medium"
-            ? "双栏演示版式，文字栏与视觉栏保持平衡留白"
-            : "便当盒式信息网格，高密度文字分组成卡片阅读区",
-        text: density === "low"
-          ? "标题和三条简短支撑要点"
-          : density === "medium"
-            ? "章节标题、紧凑段落和三到五条要点"
-            : "使用卡片、分栏和严格分组承载密集内容",
-      },
-    };
-    const picked = table[type] || table.content;
-    const typeLabel = PAGE_TYPE_LABELS[type] || PAGE_TYPE_LABELS.content;
-    const densityLabel = DENSITY_LABELS[density] || density;
     return {
       type,
       wordCount,
       density,
-      instruction: [
-        "【版式映射】",
-        `页面类型：${typeLabel}；字数密度：${densityLabel}（约 ${wordCount} 字）。`,
-        `版式方案：${picked.layout}。`,
-        `文字层级：${picked.text}。`,
-        "阅读区：文字区与装饰区清晰分离，正文放在稳定底色区域。",
-      ].join("\n"),
+      instruction: "",
     };
   }
 
@@ -1756,19 +1710,6 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
       throw error;
     }
     return page;
-  }
-
-  function buildPptLayoutPrinciplesBlock() {
-    return [
-      "【PPT排版原则｜高优先级】",
-      CONSTANTS_RULES,
-      "对比：标题、结论和关键数字使用更高层级字号与字重；标题与正文形成稳定比例。",
-      "亲密：相关内容形成清晰分组，并保持稳定间距。",
-      "对齐：文字、图形、卡片、数据区遵循统一网格与明确边线，保持秩序感。",
-      "重复：同层级元素保持一致的字体、字重、颜色、间距与容器样式。",
-      "留白：保留呼吸感，内容较多时优先分栏、分块、卡片化或图表化。",
-      "可读：正文适合投影阅读，文字区使用足够字号、清晰底色和稳定对比。",
-    ].join("\n");
   }
 
   function buildHeuristicDecoration(page, cleanOnscreenContent = "") {
@@ -1955,25 +1896,20 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
 
   function buildFinalImagePrompt(job, page, extraPrompt = "") {
     const cleanOnscreenContent = normalizeOnscreenContent(page.onscreenContentText || page.onscreenContent || page.pageContent);
-    const layout = deriveLayoutMapping(page, cleanOnscreenContent);
-    page.layoutMapping = layout;
-    page.layoutInstruction = layout.instruction;
     const pageTypeTemplate = page.pageTypePromptModule?.modulePrompt
       || buildPageTypePromptModule(job, page, cleanOnscreenContent, page.jitDecoration?.visualElementBrief || "").modulePrompt
       || "";
-    const pptLayoutPrinciples = buildPptLayoutPrinciplesBlock();
-    const layoutInstruction = layout.instruction;
     const roleInstruction = WORKFLOW_FIXED_PROMPT;
     const basicPrompt = getConfirmedThemeBasicOrThrow(job);
     return [
       roleInstruction,
-      basicPrompt ? `基础风格：${basicPrompt}` : "",
-      pptLayoutPrinciples,
+      basicPrompt ? `\u57fa\u7840\u98ce\u683c\uff1a${basicPrompt}` : "",
       pageTypeTemplate,
-      layoutInstruction,
-      `本页标题：${page.pageTitle}`,
-      cleanOnscreenContent ? `正文内容：\n${cleanOnscreenContent}` : "",
-      extraPrompt ? `补充要求：\n${normalizeOnscreenContent(extraPrompt)}` : "",
+      "\u3010\u9875\u9762\u6838\u5fc3\u5185\u5bb9\uff5c\u9ad8\u4f18\u5148\u7ea7\u3011",
+      "\u8bf7\u8ba9\u672c\u9875\u6807\u9898\u3001\u6b63\u6587\u6838\u5fc3\u7ed3\u8bba\u3001\u5173\u952e\u5bf9\u8c61\u4e0e\u5173\u952e\u6570\u5b57\u6210\u4e3a\u753b\u9762\u4e2d\u6700\u6e05\u6670\u7684\u4fe1\u606f\u5c42\u7ea7\uff0c\u907f\u514d\u88ab\u80cc\u666f\u3001\u88c5\u9970\u3001\u6750\u8d28\u6216\u914d\u56fe\u524a\u5f31\u3002",
+      `\u672c\u9875\u6807\u9898\uff1a${page.pageTitle}`,
+      cleanOnscreenContent ? `\u6b63\u6587\u5185\u5bb9\uff1a\n${cleanOnscreenContent}` : "",
+      extraPrompt ? `\u8865\u5145\u8981\u6c42\uff1a\n${normalizeOnscreenContent(extraPrompt)}` : "",
     ].filter(Boolean).join("\n\n");
   }
 
@@ -2286,7 +2222,7 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
       };
 
       if (autoExpandToMaxChars) {
-        const lengthPlan = job.promptTrace?.lengthControlPlan || job.promptTrace?.expansionPlan || null;
+        const lengthPlan = job.promptTrace?.lengthControlTrace || job.promptTrace?.expansionPlan || null;
         const normalizedMaxChars = Math.max(0, Number(lengthPlan?.maxChars) || 0);
         if (!normalizedMaxChars) {
           return res.status(400).json({
@@ -2423,7 +2359,7 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
           pageStylePrompt: "",
           basicIncluded: Boolean(basicPrompt),
           questionnaireAnchorIncluded: false,
-          layoutMapping: page.layoutMapping || null,
+          layoutMapping: null,
           pageTypeModule: page.pageTypePromptModule || null,
           jitDecoration: {
             keywords: page.jitDecoration?.keywords || [],
@@ -2699,7 +2635,7 @@ function normalizeThemeDefinition(result, fallbackThemeName, decorationLevel, pr
           pageStylePrompt: "",
           basicIncluded: Boolean(basicPrompt),
           questionnaireAnchorIncluded: false,
-          layoutMapping: page.layoutMapping || null,
+          layoutMapping: null,
           pageTypeModule: page.pageTypePromptModule || null,
           jitDecoration: {
             keywords: page.jitDecoration?.keywords || [],

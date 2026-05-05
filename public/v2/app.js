@@ -170,7 +170,7 @@ const state = {
     selectedImageId: "",
     prompt: "",
     results: [],
-    drawing: null,
+    drawing: { tool: "pen", color: "#22d3ee", width: 6, active: false, pointerId: null, startX: 0, startY: 0, snapshot: null },
   },
 };
 
@@ -190,7 +190,6 @@ const CANCEL_LABELS = {
 function cacheElements() {
   [
     "statusBar",
-    "chainDescription",
     "workspaceZoomRange",
     "workspaceZoomValue",
     "themeName",
@@ -207,7 +206,6 @@ function cacheElements() {
     "cancelThemeBtn",
     "confirmThemeBtn",
     "goSplitBtn",
-    "themeStatus",
     "themeSummaryPreview",
     "themePromptTabs",
     "themeModelPrompt",
@@ -240,10 +238,7 @@ function cacheElements() {
     "cancelSplitBtn",
     "backToThemeBtn",
     "backToSplitBtn",
-    "workflowSummary",
     "workflowStats",
-    "workflowDiagnostics",
-    "workflowPromptTrace",
     "workflowRibbonMeta",
     "workflowPageList",
     "addManualPageBtn",
@@ -304,6 +299,8 @@ function cacheElements() {
     "sendReviseBtn",
     "cancelReviseBtn",
     "reviseResultStrip",
+    "reviseHistoryStrip",
+    "exportReviseImageBtn",
     "apiKey",
     "googleApiKey",
     "grsaiApiKey",
@@ -1247,71 +1244,6 @@ function renderSplitPresets() {
   });
 }
 
-function renderHistoryProjectsLegacy() {
-  if (!el.historyProjectList || !el.historySummary || !el.historyPageGrid || !el.historyProjectMeta) return;
-  const projects = Array.isArray(state.workflowProjectsIndex) ? state.workflowProjectsIndex : [];
-  if (!projects.length) {
-    el.historySummary.textContent = "还没有历史项目。完成一次拆分后会自动收录到这里。";
-    el.historyProjectList.innerHTML = `<div class="inline-hint">暂无历史生图项目</div>`;
-    el.historyProjectMeta.textContent = "";
-    el.historyPageGrid.innerHTML = "";
-    if (el.restoreHistoryProjectBtn) el.restoreHistoryProjectBtn.disabled = true;
-    return;
-  }
-
-  const selectedProjectId = state.selectedHistoryProjectId && state.workflowProjectSnapshots[state.selectedHistoryProjectId]
-    ? state.selectedHistoryProjectId
-    : projects[0].jobId;
-  state.selectedHistoryProjectId = selectedProjectId;
-  const selectedProject = projects.find((item) => item.jobId === selectedProjectId) || projects[0];
-  const snapshot = state.workflowProjectSnapshots[selectedProject.jobId];
-
-  el.historySummary.textContent = `共 ${projects.length} 个项目，按每次拆分归档。`;
-  el.historyProjectList.innerHTML = projects.map((project) => `
-    <div class="page-item history-project-item ${project.jobId === selectedProjectId ? "is-active" : ""}" data-history-project-id="${escapeHtml(project.jobId)}">
-      <div class="history-project-title">
-        <strong>${escapeHtml(project.title || "未命名项目")}</strong>
-      </div>
-      <div class="page-meta">
-        <span class="meta-pill">${escapeHtml(`${project.totalPages || 0} 页`)}</span>
-        <span class="meta-pill">${escapeHtml(new Date(project.updatedAt || project.createdAt || Date.now()).toLocaleString("zh-CN"))}</span>
-      </div>
-    </div>
-  `).join("");
-
-  el.historyProjectList.querySelectorAll("[data-history-project-id]").forEach((node) => {
-    node.addEventListener("click", () => {
-      state.selectedHistoryProjectId = node.dataset.historyProjectId;
-      renderHistoryProjects();
-      saveState();
-    });
-  });
-
-  el.historyProjectMeta.textContent = selectedProject
-    ? `${selectedProject.title || "未命名项目"} · ${selectedProject.totalPages || 0} 页 · ${new Date(selectedProject.updatedAt || selectedProject.createdAt || Date.now()).toLocaleString("zh-CN")}`
-    : "";
-
-  const pageCards = Array.isArray(selectedProject?.pageSummaries) ? selectedProject.pageSummaries : [];
-  el.historyPageGrid.innerHTML = pageCards.length
-    ? pageCards.map((page) => `
-      <div class="file-item history-page-card">
-        ${page.baseImage ? `<img src="${escapeHtml(page.baseImage)}" alt="${escapeHtml(page.pageTitle || `第${page.pageNumber}页`)}" />` : `<div class="inline-summary">该页还没有生成结果</div>`}
-        <strong>第${page.pageNumber}页 · ${escapeHtml(page.pageTitle || "未命名")}</strong>
-        <span>${page.generated ? "已生成" : "未生成"}</span>
-      </div>
-    `).join("")
-    : `<div class="inline-hint">这个项目还没有页面快照。</div>`;
-
-  if (el.restoreHistoryProjectBtn) {
-    el.restoreHistoryProjectBtn.disabled = !snapshot;
-  }
-  el.historyPageGrid.querySelectorAll("[data-history-image-src]").forEach((node) => {
-    node.addEventListener("click", () => {
-      openImageViewer(node.dataset.historyImageSrc || "", node.dataset.historyImageTitle || "历史生图");
-    });
-  });
-}
-
 function restoreHistoryProject() {
   const projectId = state.selectedHistoryProjectId;
   const snapshot = state.workflowProjectSnapshots[projectId];
@@ -1688,7 +1620,7 @@ function renderPageDrawingLayer() {
       currentCtx.clearRect(0, 0, el.pageDrawCanvas.width, el.pageDrawCanvas.height);
       currentCtx.drawImage(image, 0, 0, el.pageDrawCanvas.width, el.pageDrawCanvas.height);
     })
-    .catch(() => {});
+    .catch(err => console.warn("加载页面绘制层失败。", err));
 }
 
 function updatePageDrawToolbar() {
@@ -2066,6 +1998,7 @@ function ensureReviseSelection() {
 function renderRevise() {
   ensureReviseSelection();
   const image = getCurrentReviseImage();
+  updateReviseDrawToolbar();
   el.reviseImageName.textContent = image?.name || "请先导入底图";
   const index = state.revise.images.findIndex((item) => item.id === state.revise.selectedImageId);
   el.reviseImageCounter.textContent = image ? `${index + 1} / ${state.revise.images.length}` : "0 / 0";
@@ -2095,6 +2028,39 @@ function renderRevise() {
   el.reviseResultStrip.innerHTML = state.revise.results.map((src) => `
     <div class="result-item"><img src="${escapeHtml(src)}" alt="改图结果" /></div>
   `).join("");
+
+  // 左侧历史记录面板
+  if (el.reviseHistoryStrip) {
+    el.reviseHistoryStrip.innerHTML = state.revise.results.length
+      ? `<div style="font-size:13px;color:var(--text-muted);margin-bottom:6px;">历史改图结果（点击切换查看）</div>`
+        + state.revise.results.map((src, i) => `
+          <div class="result-item" data-result-index="${i}" style="cursor:pointer;">
+            <img src="${escapeHtml(src)}" alt="改图结果 ${i + 1}" />
+          </div>
+        `).join("")
+      : "";
+    el.reviseHistoryStrip.querySelectorAll("[data-result-index]").forEach((item) => {
+      item.addEventListener("click", () => {
+        const idx = parseInt(item.dataset.resultIndex, 10);
+        const resultSrc = state.revise.results[idx];
+        if (resultSrc) {
+          state.revise.images.push({
+            id: uid(),
+            name: `改图结果 ${idx + 1}`,
+            src: resultSrc,
+            drawingLayer: "",
+          });
+          state.revise.selectedImageId = state.revise.images[state.revise.images.length - 1].id;
+          renderRevise();
+        }
+      });
+    });
+  }
+
+  // 导出按钮
+  if (el.exportReviseImageBtn) {
+    el.exportReviseImageBtn.style.display = image ? "inline-flex" : "none";
+  }
 }
 
 function fitCanvasToStage() {
@@ -2109,19 +2075,34 @@ function drawReviseCanvas(tempBox = null) {
   ctx.clearRect(0, 0, el.reviseCanvas.width, el.reviseCanvas.height);
   const image = getCurrentReviseImage();
   if (!image?.naturalWidth || !image?.naturalHeight) return;
-  const scaleX = el.reviseCanvas.width / image.naturalWidth;
-  const scaleY = el.reviseCanvas.height / image.naturalHeight;
-  [...(image.boxes || []), ...(tempBox ? [tempBox] : [])].forEach((box, index) => {
-    const [x1, y1, x2, y2] = box;
-    ctx.strokeStyle = "#d92d20";
-    ctx.fillStyle = "rgba(217, 45, 32, 0.14)";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x1 * scaleX, y1 * scaleY, (x2 - x1) * scaleX, (y2 - y1) * scaleY);
-    ctx.fillRect(x1 * scaleX, y1 * scaleY, (x2 - x1) * scaleX, (y2 - y1) * scaleY);
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "600 12px sans-serif";
-    ctx.fillText(`区域 ${index + 1}`, x1 * scaleX + 6, y1 * scaleY + 18);
-  });
+
+  const drawOverlays = () => {
+    const scaleX = el.reviseCanvas.width / image.naturalWidth;
+    const scaleY = el.reviseCanvas.height / image.naturalHeight;
+    [...(image.boxes || []), ...(tempBox ? [tempBox] : [])].forEach((box, index) => {
+      const [x1, y1, x2, y2] = box;
+      ctx.strokeStyle = "#d92d20";
+      ctx.fillStyle = "rgba(217, 45, 32, 0.14)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([]);
+      ctx.strokeRect(x1 * scaleX, y1 * scaleY, (x2 - x1) * scaleX, (y2 - y1) * scaleY);
+      ctx.fillRect(x1 * scaleX, y1 * scaleY, (x2 - x1) * scaleX, (y2 - y1) * scaleY);
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "600 12px sans-serif";
+      ctx.fillText(`区域 ${index + 1}`, x1 * scaleX + 6, y1 * scaleY + 18);
+    });
+  };
+
+  if (image.drawingLayer) {
+    const layerImg = new Image();
+    layerImg.onload = () => {
+      ctx.drawImage(layerImg, 0, 0, el.reviseCanvas.width, el.reviseCanvas.height);
+      drawOverlays();
+    };
+    layerImg.src = image.drawingLayer;
+  } else {
+    drawOverlays();
+  }
 }
 
 function stagePointToNatural(clientX, clientY) {
@@ -2133,53 +2114,215 @@ function stagePointToNatural(clientX, clientY) {
   return { x, y };
 }
 
+function updateReviseDrawToolbar() {
+  const tool = state.revise.drawing?.tool || "";
+  el.reviseDrawPenBtn?.classList.toggle("is-active", tool === "pen");
+  el.reviseDrawRectBtn?.classList.toggle("is-active", tool === "rect");
+  el.reviseCanvas?.classList.toggle("is-drawing-enabled", Boolean(tool));
+  if (el.reviseDrawColorInput && state.revise.drawing?.color) {
+    el.reviseDrawColorInput.value = state.revise.drawing.color;
+  }
+}
+
+function saveReviseDrawingLayer() {
+  const image = getCurrentReviseImage();
+  if (!image || !el.reviseCanvas) return;
+  image.drawingLayer = el.reviseCanvas.toDataURL("image/png");
+  saveState();
+}
+
 function setupReviseCanvasInteractions() {
-  const startDrawing = (event) => {
+  if (!el.reviseCanvas || el.reviseCanvas.dataset.bound === "true") return;
+  const drawingState = state.revise.drawing;
+
+  const getCanvasPoint = (event) => {
+    const rect = el.reviseCanvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    return {
+      x: ((event.clientX - rect.left) / rect.width) * el.reviseCanvas.width,
+      y: ((event.clientY - rect.top) / rect.height) * el.reviseCanvas.height,
+    };
+  };
+
+  const getCtx = () => el.reviseCanvas.getContext("2d");
+  const applyStrokeStyle = (ctx) => {
+    ctx.strokeStyle = drawingState.color || "#22d3ee";
+    ctx.lineWidth = drawingState.width || 6;
+    ctx.setLineDash([]);
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+  };
+  const applyRectStyle = (ctx) => {
+    const color = drawingState.color || "#22d3ee";
+    ctx.strokeStyle = color;
+    ctx.fillStyle = `${color}26`;
+    ctx.lineWidth = Math.max(4, drawingState.width || 6);
+    ctx.setLineDash([10, 8]);
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+  };
+
+  // --- Drawing tool handlers (pen/rect) ---
+  const drawPointerDown = (event) => {
+    if (event.button !== 0) return;
+    const tool = drawingState.tool || "";
+    if (!tool) return;
+    const image = getCurrentReviseImage();
+    if (!image) return;
+    const point = getCanvasPoint(event);
+    const ctx = getCtx();
+    if (!point || !ctx) return;
+    drawingState.active = true;
+    drawingState.pointerId = event.pointerId;
+    drawingState.startX = point.x;
+    drawingState.startY = point.y;
+    drawingState.snapshot = ctx.getImageData(0, 0, el.reviseCanvas.width, el.reviseCanvas.height);
+    if (tool === "pen") {
+      applyStrokeStyle(ctx);
+      ctx.beginPath();
+      ctx.moveTo(point.x, point.y);
+    }
+    el.reviseCanvas.setPointerCapture?.(event.pointerId);
+  };
+
+  const drawPointerMove = (event) => {
+    if (!drawingState.active || drawingState.pointerId !== event.pointerId) return;
+    const point = getCanvasPoint(event);
+    const ctx = getCtx();
+    if (!point || !ctx) return;
+    const tool = drawingState.tool || "";
+    if (tool === "pen") {
+      applyStrokeStyle(ctx);
+      ctx.lineTo(point.x, point.y);
+      ctx.stroke();
+      return;
+    }
+    if (tool === "rect" && drawingState.snapshot) {
+      ctx.putImageData(drawingState.snapshot, 0, 0);
+      applyRectStyle(ctx);
+      const x = Math.min(drawingState.startX, point.x);
+      const y = Math.min(drawingState.startY, point.y);
+      const w = Math.abs(point.x - drawingState.startX);
+      const h = Math.abs(point.y - drawingState.startY);
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeRect(x, y, w, h);
+      ctx.setLineDash([]);
+    }
+  };
+
+  const drawPointerUp = (event) => {
+    if (!drawingState.active) return;
+    if (drawingState.pointerId != null && event.pointerId != null && drawingState.pointerId !== event.pointerId) return;
+    drawingState.active = false;
+    drawingState.pointerId = null;
+    drawingState.snapshot = null;
+    saveReviseDrawingLayer();
+  };
+
+  // --- Box selection handlers (when no drawing tool active) ---
+  const startBoxDrawing = (event) => {
     const image = getCurrentReviseImage();
     if (!image) return;
     const point = stagePointToNatural(event.clientX, event.clientY);
     if (!point) return;
-    state.revise.drawing = { start: point };
+    state.revise.boxDrawing = { start: point };
   };
-  const moveDrawing = (event) => {
+  const moveBoxDrawing = (event) => {
     const image = getCurrentReviseImage();
-    if (!image || !state.revise.drawing?.start) return;
+    if (!image || !state.revise.boxDrawing?.start) return;
     const current = stagePointToNatural(event.clientX, event.clientY);
     if (!current) return;
     const box = normalizeBox([
-      state.revise.drawing.start.x,
-      state.revise.drawing.start.y,
+      state.revise.boxDrawing.start.x,
+      state.revise.boxDrawing.start.y,
       current.x,
       current.y,
     ]);
     drawReviseCanvas(box);
   };
-  const endDrawing = (event) => {
+  const endBoxDrawing = (event) => {
     const image = getCurrentReviseImage();
-    if (!image || !state.revise.drawing?.start) return;
+    if (!image || !state.revise.boxDrawing?.start) return;
     const current = stagePointToNatural(event.clientX, event.clientY);
     const box = current ? normalizeBox([
-      state.revise.drawing.start.x,
-      state.revise.drawing.start.y,
+      state.revise.boxDrawing.start.x,
+      state.revise.boxDrawing.start.y,
       current.x,
       current.y,
     ]) : null;
-    state.revise.drawing = null;
+    state.revise.boxDrawing = null;
     if (box && image.boxes.length < MAX_REVISE_BOXES) {
       image.boxes.push(box);
     }
     drawReviseCanvas();
   };
-  el.reviseCanvas.addEventListener("pointerdown", startDrawing);
-  el.reviseCanvas.addEventListener("pointermove", moveDrawing);
+
+  el.reviseCanvas.addEventListener("pointerdown", (event) => {
+    if (drawingState.tool) {
+      drawPointerDown(event);
+    } else {
+      startBoxDrawing(event);
+    }
+  });
+  el.reviseCanvas.addEventListener("pointermove", (event) => {
+    if (drawingState.tool) {
+      drawPointerMove(event);
+    } else {
+      moveBoxDrawing(event);
+    }
+  });
+  el.reviseCanvas.addEventListener("pointerup", (event) => {
+    if (drawingState.tool) {
+      drawPointerUp(event);
+    } else {
+      endBoxDrawing(event);
+    }
+  });
+  el.reviseCanvas.addEventListener("pointerleave", (event) => {
+    if (drawingState.tool) {
+      drawPointerUp(event);
+    }
+  });
   el.reviseCanvas.addEventListener("dblclick", () => {
+    if (drawingState.tool) return;
     const image = getCurrentReviseImage();
     if (!image) return;
     image.boxes = [];
     drawReviseCanvas();
     setStatus("已清空当前图片的框选区域。", "success");
   });
-  window.addEventListener("pointerup", endDrawing);
+
+  // Draw tool buttons
+  el.reviseDrawPenBtn = document.getElementById("reviseDrawPenBtn");
+  el.reviseDrawRectBtn = document.getElementById("reviseDrawRectBtn");
+  el.reviseDrawColorInput = document.getElementById("reviseDrawColorInput");
+  el.clearReviseDrawingBtn = document.getElementById("clearReviseDrawingBtn");
+
+  el.reviseDrawPenBtn?.addEventListener("click", () => {
+    drawingState.tool = drawingState.tool === "pen" ? "" : "pen";
+    saveState();
+    updateReviseDrawToolbar();
+  });
+  el.reviseDrawRectBtn?.addEventListener("click", () => {
+    drawingState.tool = drawingState.tool === "rect" ? "" : "rect";
+    saveState();
+    updateReviseDrawToolbar();
+  });
+  el.clearReviseDrawingBtn?.addEventListener("click", () => {
+    const image = getCurrentReviseImage();
+    if (image) {
+      image.drawingLayer = "";
+      drawReviseCanvas();
+      saveState();
+    }
+  });
+  el.reviseDrawColorInput?.addEventListener("input", () => {
+    drawingState.color = el.reviseDrawColorInput.value || "#22d3ee";
+    saveState();
+  });
+
+  el.reviseCanvas.dataset.bound = "true";
+  updateReviseDrawToolbar();
 }
 
 function normalizeBox(box) {
@@ -2378,6 +2521,36 @@ async function sendRevise() {
     return;
   }
 
+  // Composite drawing layer if present
+  let finalImageSrc = image.src;
+  if (image.drawingLayer) {
+    const imgW = image.naturalWidth || 1024;
+    const imgH = image.naturalHeight || 1024;
+    const mergedUrl = await new Promise((resolve, reject) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = imgW;
+      canvas.height = imgH;
+      const ctx = canvas.getContext("2d");
+      const baseImg = new Image();
+      baseImg.onload = () => {
+        ctx.drawImage(baseImg, 0, 0, imgW, imgH);
+        const drawImg = new Image();
+        drawImg.onload = () => {
+          ctx.drawImage(drawImg, 0, 0, imgW, imgH);
+          resolve(canvas.toDataURL("image/png"));
+        };
+        drawImg.onerror = () => reject(new Error("合成绘制层失败。"));
+        drawImg.src = image.drawingLayer;
+      };
+      baseImg.onerror = () => reject(new Error("加载底图失败。"));
+      baseImg.src = image.src;
+    }).catch((err) => {
+      console.warn("合成绘制层失败，使用原始底图继续。", err);
+      return image.src;
+    });
+    finalImageSrc = mergedUrl;
+  }
+
   const payload = {
     model: EDIT_MODEL,
     input: {
@@ -2386,7 +2559,7 @@ async function sendRevise() {
           role: "user",
           content: [
             { text: state.revise.prompt },
-            { image: image.src },
+            { image: finalImageSrc },
           ],
         },
       ],
@@ -2431,6 +2604,7 @@ async function sendRevise() {
     if (current && results[0]) {
       current.src = results[0];
       current.boxes = [];
+      current.drawingLayer = "";
       current.naturalWidth = 0;
       current.naturalHeight = 0;
       el.reviseBaseImage.onload = () => {
@@ -2447,6 +2621,26 @@ async function sendRevise() {
   } finally {
     finishCancelableAction("revise");
   }
+}
+
+function exportReviseImage() {
+  const image = getCurrentReviseImage();
+  if (!image) {
+    setStatus("请先导入底图。", "error");
+    return;
+  }
+  const canvas = el.reviseCanvas;
+  const offscreen = document.createElement("canvas");
+  offscreen.width = el.reviseBaseImage.naturalWidth || canvas.width;
+  offscreen.height = el.reviseBaseImage.naturalHeight || canvas.height;
+  const ctx = offscreen.getContext("2d");
+  ctx.drawImage(el.reviseBaseImage, 0, 0, offscreen.width, offscreen.height);
+  ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, offscreen.width, offscreen.height);
+  const dataUrl = offscreen.toDataURL("image/png");
+  const link = document.createElement("a");
+  link.download = `${(image.name || "revise").replace(/\.\w+$/, "")}_edited.png`;
+  link.href = dataUrl;
+  link.click();
 }
 
 function bindEvents() {
@@ -2581,6 +2775,7 @@ function bindEvents() {
   });
   el.sendReviseBtn.addEventListener("click", sendRevise);
   el.cancelReviseBtn.addEventListener("click", () => cancelAction("revise"));
+  el.exportReviseImageBtn?.addEventListener("click", exportReviseImage);
 
   el.apiKey.addEventListener("input", () => {
     state.settings.apiKey = el.apiKey.value.trim();
@@ -2916,6 +3111,8 @@ function startWorkflowPolling() {
   stopWorkflowPolling();
   if (!state.workflowJobId) return;
   state.workflowPollTimer = setInterval(async () => {
+    if (state.workflowPollActive) return;
+    state.workflowPollActive = true;
     try {
       const data = await apiJson(`/api/workflow/jobs/${encodeURIComponent(state.workflowJobId)}`);
       state.workflowJob = sanitizeRecoveredWorkflowJob(data.job);
@@ -2938,6 +3135,8 @@ function startWorkflowPolling() {
         return;
       }
       setStatus(error.message || "读取任务进度失败。", "error");
+    } finally {
+      state.workflowPollActive = false;
     }
   }, 2200);
 }
@@ -2963,16 +3162,11 @@ function renderPageList() {
   const job = state.workflowJob;
   if (!job?.pages?.length) {
     if (el.workflowStats) el.workflowStats.textContent = "";
-    if (el.workflowDiagnostics) el.workflowDiagnostics.textContent = "";
-    if (el.workflowPromptTrace) el.workflowPromptTrace.textContent = "";
     el.workflowPageList.innerHTML = "";
     return;
   }
   ensureSelectedPage();
-  if (el.workflowSummary) el.workflowSummary.textContent = "";
   if (el.workflowStats) el.workflowStats.textContent = formatJobStats(job);
-  if (el.workflowDiagnostics) el.workflowDiagnostics.textContent = normalizeDisplayText(job.splitDiagnostics);
-  if (el.workflowPromptTrace) el.workflowPromptTrace.textContent = stringifyTrace(job.promptTrace);
   el.workflowPageList.innerHTML = job.pages.map((page) => {
     const typeMeta = getPageTypeMeta(page.pageType);
     const pageActive = isPageGenerating(page.id);

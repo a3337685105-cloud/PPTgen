@@ -9,10 +9,20 @@ if (typeof Path2D === "undefined") {
 }
 
 const crypto = require("crypto");
-const { spawn } = require("child_process");
 const fs = require("fs");
 const fsp = require("fs/promises");
+const os = require("os");
 const path = require("path");
+
+function randomUUID() {
+  if (typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
+    const r = (Math.random() * 16) | 0;
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
 const express = require("express");
 const multer = require("multer");
 const JSZip = require("jszip");
@@ -26,7 +36,25 @@ const PORT = process.env.PORT || 3000;
 let ACTIVE_PORT = Number(PORT);
 const ROOT_DIR = __dirname;
 const PUBLIC_DIR = path.join(ROOT_DIR, "public");
-const RUNTIME_DIR = process.env.PPTGEN_RUNTIME_DIR || (process.pkg ? path.dirname(process.execPath) : __dirname);
+const DEFAULT_RUNTIME_DIR = process.env.PPTGEN_RUNTIME_DIR || (process.pkg ? path.dirname(process.execPath) : __dirname);
+const FALLBACK_RUNTIME_DIR = path.join(os.homedir(), "AppData", "Roaming", "AI驱动演示文稿自动生成系统", "runtime");
+
+function resolveWritableRuntimeDir(preferredDir) {
+  for (const dir of [preferredDir, FALLBACK_RUNTIME_DIR]) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      for (const subDir of ["generated-images", "exports", path.join("data", "reference-assets")]) {
+        fs.mkdirSync(path.join(dir, subDir), { recursive: true });
+      }
+      return dir;
+    } catch (_error) {
+      // Try the next candidate when the app is installed in a protected directory.
+    }
+  }
+  throw new Error(`No writable runtime directory is available. Tried: ${preferredDir}; ${FALLBACK_RUNTIME_DIR}`);
+}
+
+const RUNTIME_DIR = resolveWritableRuntimeDir(DEFAULT_RUNTIME_DIR);
 const GENERATED_DIR = path.join(RUNTIME_DIR, "generated-images");
 const EXPORTS_DIR = path.join(RUNTIME_DIR, "exports");
 const DATA_DIR = path.join(RUNTIME_DIR, "data");
@@ -66,8 +94,6 @@ const OPENAI_IMAGE_MODELS = new Set([
   "gpt-image-2",
 ]);
 const SUPPORTED_GEMINI_ASPECTS = new Set(["1:1", "4:3", "16:9", "3:4", "9:16"]);
-const POWERSHELL_HTTP_TIMEOUT_SEC = clampNumber(process.env.PPTGEN_HTTP_TIMEOUT_SEC, 180, 10, 600);
-
 fs.mkdirSync(GENERATED_DIR, { recursive: true });
 fs.mkdirSync(EXPORTS_DIR, { recursive: true });
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -178,11 +204,15 @@ function pickExtensionFromMimeType(mimeType) {
 }
 
 function getImageExtensionFromBuffer(buffer) {
-  if (!Buffer.isBuffer(buffer) || buffer.length < 12) return "";
+  if (!Buffer.isBuffer(buffer) || buffer.length < 4) return "";
   if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return ".png";
   if (buffer[0] === 0xff && buffer[1] === 0xd8) return ".jpg";
   if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 && buffer.slice(8, 12).toString("ascii") === "WEBP") return ".webp";
   if (buffer.slice(0, 6).toString("ascii") === "GIF87a" || buffer.slice(0, 6).toString("ascii") === "GIF89a") return ".gif";
+  if (buffer[0] === 0x42 && buffer[1] === 0x4d) return ".bmp";
+  if ((buffer[0] === 0x49 && buffer[1] === 0x49 && buffer[2] === 0x2a && buffer[3] === 0x00) || (buffer[0] === 0x4d && buffer[1] === 0x4d && buffer[2] === 0x00 && buffer[3] === 0x2a)) return ".tiff";
+  const textStart = buffer.slice(0, Math.min(buffer.length, 100)).toString("utf8").trimStart();
+  if (textStart.startsWith("<svg") || textStart.startsWith("<?xml")) return ".svg";
   return "";
 }
 
@@ -263,7 +293,7 @@ async function saveGeneratedBufferToFile(buffer, { prefix = "result", requestId 
     buildTimestamp(),
     sanitizeSegment(requestId, "result"),
     sanitizeSegment(index, "1"),
-    crypto.randomUUID().slice(0, 8),
+    randomUUID().slice(0, 8),
   ].join("_") + extension;
   const targetPath = path.join(GENERATED_DIR, fileName);
   await fsp.writeFile(targetPath, buffer);
@@ -275,43 +305,47 @@ async function saveGeneratedBufferToFile(buffer, { prefix = "result", requestId 
 }
 
 async function loadGeminiImageSource(source) {
-  const value = String(source || "").trim();
-  if (!value) {
-    throw new Error("Gemini 输入图片为空。");
-  }
-
-  const parsedDataUrl = parseDataUrl(value);
-  if (parsedDataUrl) {
-    return parsedDataUrl;
-  }
-
-  if (value.startsWith("/generated-images/")) {
-    const fileName = decodeURIComponent(value.slice("/generated-images/".length));
-    const targetPath = path.join(GENERATED_DIR, fileName);
-    const buffer = await fsp.readFile(targetPath);
-    const extension = path.extname(targetPath) || ".png";
-    return {
-      buffer,
-      extension,
-      mimeType: extensionToMimeType(extension),
-    };
-  }
-
-  if (/^https?:\/\//i.test(value)) {
-    const response = await fetch(value);
-    if (!response.ok) {
-      throw new Error(`读取 Gemini 输入图片失败，状态码 ${response.status}。`);
+  try {
+    const value = String(source || "").trim();
+    if (!value) {
+      return null;
     }
-    const contentType = response.headers.get("content-type") || "";
-    const extension = pickFileExtension(value, contentType);
-    return {
-      buffer: Buffer.from(await response.arrayBuffer()),
-      extension,
-      mimeType: contentType || extensionToMimeType(extension),
-    };
-  }
 
-  throw new Error("Gemini 目前只支持 data URL、本地缓存图或 http(s) 图片链接作为输入。");
+    const parsedDataUrl = parseDataUrl(value);
+    if (parsedDataUrl) {
+      return parsedDataUrl;
+    }
+
+    if (value.startsWith("/generated-images/")) {
+      const fileName = decodeURIComponent(value.slice("/generated-images/".length));
+      const targetPath = path.join(GENERATED_DIR, fileName);
+      const buffer = await fsp.readFile(targetPath);
+      const extension = path.extname(targetPath) || ".png";
+      return {
+        buffer,
+        extension,
+        mimeType: extensionToMimeType(extension),
+      };
+    }
+
+    if (/^https?:\/\//i.test(value)) {
+      const response = await fetch(value);
+      if (!response.ok) {
+        return null;
+      }
+      const contentType = response.headers.get("content-type") || "";
+      const extension = pickFileExtension(value, contentType);
+      return {
+        buffer: Buffer.from(await response.arrayBuffer()),
+        extension,
+        mimeType: contentType || extensionToMimeType(extension),
+      };
+    }
+
+    return null;
+  } catch (error) {
+    return null;
+  }
 }
 
 function toDataUrl(buffer, mimeType) {
@@ -351,7 +385,7 @@ function toPptPosition(position, slideSize, layout) {
 
 async function saveReferenceImage(file) {
   const extension = pickExtensionFromMimeType(file.mimetype || extensionToMimeType(path.extname(file.originalname)));
-  const assetId = crypto.randomUUID();
+  const assetId = randomUUID();
   const fileName = `${assetId}${extension}`;
   const targetPath = path.join(REFERENCE_ASSETS_DIR, fileName);
   await fsp.mkdir(REFERENCE_ASSETS_DIR, { recursive: true });
@@ -413,6 +447,7 @@ async function convertMessagesToGeminiContents(messages) {
 
       if (typeof item?.image === "string" && item.image.trim()) {
         const image = await loadGeminiImageSource(item.image.trim());
+        if (!image) continue;
         parts.push({
           inlineData: {
             mimeType: image.mimeType || "image/png",
@@ -478,127 +513,13 @@ function buildOpenAiImageGenerationsUrl(baseUrl) {
   return resolveOpenAiImageEndpoint(baseUrl);
 }
 
-function shouldUsePowerShellHttpFallback(error) {
-  if (process.platform !== "win32") return false;
-  const message = String(error?.message || "");
-  const causeMessage = String(error?.cause?.message || "");
-  const errorCode = String(error?.code || error?.cause?.code || "");
-  return [
-    /fetch failed/i.test(message),
-    /secure TLS connection/i.test(causeMessage),
-    /ssl|tls/i.test(causeMessage),
-    /socket disconnected/i.test(causeMessage),
-    ["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "UND_ERR_CONNECT_TIMEOUT"].includes(errorCode),
-  ].some(Boolean);
-}
-
-async function requestJsonViaPowerShell({ url, method = "POST", headers = {}, body }) {
-  const script = [
-    "$ErrorActionPreference = 'Stop'",
-    "$request = ([Console]::In.ReadToEnd() | ConvertFrom-Json)",
-    "$headers = @{}",
-    "$contentType = $null",
-    "if ($null -ne $request.headers) {",
-    "  $request.headers.PSObject.Properties | ForEach-Object {",
-    "    if ($_.Name -ieq 'Content-Type') { $contentType = [string]$_.Value }",
-    "    else { $headers[$_.Name] = [string]$_.Value }",
-    "  }",
-    "}",
-    `$params = @{ Uri = [string]$request.url; Method = [string]$request.method; UseBasicParsing = $true; TimeoutSec = ${POWERSHELL_HTTP_TIMEOUT_SEC}; Headers = $headers }`,
-    "if ($contentType) { $params['ContentType'] = $contentType }",
-    "if ($null -ne $request.body -and [string]$request.body -ne '') { $params['Body'] = [string]$request.body }",
-    "$statusCode = 0",
-    "$content = ''",
-    "try {",
-    "  $response = Invoke-WebRequest @params",
-    "  $statusCode = [int]$response.StatusCode",
-    "  $content = [string]$response.Content",
-    "} catch {",
-    "  if ($_.Exception.Response) {",
-    "    $resp = $_.Exception.Response",
-    "    $statusCode = [int]$resp.StatusCode",
-    "    $reader = New-Object System.IO.StreamReader($resp.GetResponseStream())",
-    "    $content = $reader.ReadToEnd()",
-    "    $reader.Close()",
-    "  } else {",
-    "    throw",
-    "  }",
-    "}",
-    "$result = @{ ok = ($statusCode -ge 200 -and $statusCode -lt 300); status = $statusCode; text = $content }",
-    "[Console]::Out.Write(($result | ConvertTo-Json -Compress -Depth 8))",
-  ].join("\n");
-
-  const payload = JSON.stringify({ url, method, headers, body });
-  const raw = await new Promise((resolve, reject) => {
-    const child = spawn("powershell.exe", [
-      "-NoProfile",
-      "-NonInteractive",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-Command",
-      script,
-    ], {
-      windowsHide: true,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString("utf8");
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString("utf8");
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code !== 0 && !stdout.trim()) {
-        return reject(new Error(stderr.trim() || `PowerShell HTTP fallback exited with code ${code}.`));
-      }
-      try {
-        resolve(JSON.parse(stdout));
-      } catch {
-        reject(new Error(`PowerShell HTTP fallback returned invalid JSON: ${stderr.trim() || stdout.slice(0, 300)}`));
-      }
-    });
-
-    child.stdin.end(payload);
-  });
-
-  const text = typeof raw?.text === "string" ? raw.text : "";
-  try {
-    return {
-      ok: Boolean(raw?.ok),
-      status: Number(raw?.status) || 500,
-      data: JSON.parse(text),
-    };
-  } catch {
-    return {
-      ok: Boolean(raw?.ok),
-      status: Number(raw?.status) || 500,
-      data: {
-        code: "InvalidJSON",
-        message: text || "Upstream returned a non-JSON response.",
-      },
-    };
-  }
-}
-
 async function requestJsonViaFetch({ url, method = "POST", headers = {}, body }) {
-  try {
-    const response = await fetch(url, {
-      method,
-      headers,
-      body,
-    });
-    return parseJsonResponse(response);
-  } catch (error) {
-    if (!shouldUsePowerShellHttpFallback(error)) {
-      throw error;
-    }
-    return requestJsonViaPowerShell({ url, method, headers, body });
-  }
+  const response = await fetch(url, {
+    method,
+    headers,
+    body,
+  });
+  return parseJsonResponse(response);
 }
 
 async function requestGeminiJson(request) {
@@ -622,7 +543,7 @@ function buildOpenAiImageGenerationBody({ payload, slideAspect }) {
 }
 
 async function normalizeOpenAiImageGenerationResponse(data, model) {
-  const requestId = String(data?.id || data?.request_id || data?.response_id || crypto.randomUUID()).trim();
+  const requestId = String(data?.id || data?.request_id || data?.response_id || randomUUID()).trim();
   const content = [];
 
   const rawItems = Array.isArray(data?.data) ? data.data : (Array.isArray(data?.images) ? data.images : (Array.isArray(data?.urls) ? data.urls : (Array.isArray(data) ? data : [])));
@@ -709,7 +630,26 @@ async function normalizeOpenAiImageGenerationResponse(data, model) {
       buffer = await sniff(rawData);
 
       if (finalUrl) {
-        content.push({ type: "image", image: finalUrl });
+        try {
+          const response = await fetch(finalUrl);
+          if (response.ok) {
+            const contentType = response.headers.get("content-type") || "";
+            const fetchedBuffer = Buffer.from(await response.arrayBuffer());
+            const fetchedExtension = getImageExtensionFromBuffer(fetchedBuffer) || pickFileExtension(finalUrl, contentType) || extension;
+            imageIndex += 1;
+            const saved = await saveGeneratedBufferToFile(fetchedBuffer, {
+              prefix: "gpt_image_2",
+              requestId,
+              index: imageIndex,
+              extension: fetchedExtension,
+            });
+            content.push({ type: "image", image: saved.localUrl });
+          } else {
+            content.push({ type: "image", image: finalUrl });
+          }
+        } catch {
+          content.push({ type: "image", image: finalUrl });
+        }
       } else if (buffer) {
         imageIndex += 1;
         const saved = await saveGeneratedBufferToFile(buffer, {
@@ -770,7 +710,7 @@ async function normalizeGeminiGenerateResponse(data, model) {
   }
   const candidate = Array.isArray(data?.candidates) ? data.candidates[0] : null;
   const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
-  const requestId = String(data?.responseId || data?.response_id || crypto.randomUUID()).trim();
+  const requestId = String(data?.responseId || data?.response_id || randomUUID()).trim();
   const content = [];
   let imageIndex = 0;
 
@@ -829,7 +769,7 @@ function normalizeGrsaiDrawResponse(data, model) {
     }
   });
   return {
-    request_id: String(data?.id || crypto.randomUUID()),
+    request_id: String(data?.id || randomUUID()),
     provider: "grsai",
     model,
     usage: null,
@@ -865,20 +805,25 @@ function extractPromptAndImagesFromPayload(payload) {
 
 async function requestGrsaiGenerate({ apiKey, model, payload, slideAspect, size, host }) {
   const geminiBody = await buildGeminiGenerationBody({ payload, slideAspect });
-  const compatible = await requestJsonViaFetch({
-    method: "POST",
-    url: `${buildGrsaiModelUrl(model, host)}:generateContent`,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-      "x-goog-api-key": apiKey,
-    },
-    body: JSON.stringify(geminiBody),
-  });
-  const compatibleHasResult = Array.isArray(compatible.data?.candidates)
-    || Array.isArray(compatible.data?.results)
-    || Array.isArray(compatible.data?.data?.results);
-  if (compatible.ok && compatibleHasResult) {
+  let compatible;
+  try {
+    compatible = await requestJsonViaFetch({
+      method: "POST",
+      url: `${buildGrsaiModelUrl(model, host)}:generateContent`,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+        "x-goog-api-key": apiKey,
+      },
+      body: JSON.stringify(geminiBody),
+    });
+  } catch (_networkError) {
+    compatible = { ok: false, data: null, status: 0 };
+  }
+  const compatibleHasResult = Array.isArray(compatible?.data?.candidates)
+    || Array.isArray(compatible?.data?.results)
+    || Array.isArray(compatible?.data?.data?.results);
+  if (compatible?.ok && compatibleHasResult) {
     return normalizeGeminiGenerateResponse(compatible.data, model);
   }
 
@@ -1508,18 +1453,18 @@ function buildHeuristicResearchQuery(pageTitle, pageContent) {
     if (value && !parts.includes(value)) parts.push(value);
   };
 
-  if (/鏅鸿兘绐梶鏅鸿兘鐜荤拑|璋冨厜鐜荤拑|Smart Window|Smart Glass/i.test(text)) {
+  if (/智能窗|智能玻璃|调光玻璃|Smart Window|Smart Glass/i.test(text)) {
     push("smart window");
     push("smart glass");
   }
-  if (/鐢佃嚧鍙樿壊|electrochromic/i.test(text)) push("electrochromic");
-  if (/鐑嚧鍙樿壊|thermochromic/i.test(text)) push("thermochromic");
-  if (/鍏夎嚧鍙樿壊|photochromic/i.test(text)) push("photochromic");
-  if (/\bPDLC\b|娑叉櫠/i.test(text)) push("PDLC");
+  if (/电致变色|electrochromic/i.test(text)) push("electrochromic");
+  if (/热致变色|thermochromic/i.test(text)) push("thermochromic");
+  if (/光致变色|photochromic/i.test(text)) push("photochromic");
+  if (/\bPDLC\b|液晶/i.test(text)) push("PDLC");
   if (/\bSPD\b/i.test(text)) push("SPD");
-  if (/鍙戝睍鍘嗗彶|婕旇繘|鍘嗙▼|姒傝堪|瀹氫箟|鍒嗙被|history|overview/i.test(text)) push("technology history");
-  if (/寤虹瓚|鑺傝兘|骞曞|閲囧厜|energy|building/i.test(text)) push("building energy saving");
-  if (/搴旂敤|鍦烘櫙|甯傚満|鏈潵|瓒嬪娍|application|market|future/i.test(text)) push("applications market");
+  if (/发展历程|演进|历程|概述|定义|分类|history|overview/i.test(text)) push("technology history");
+  if (/建筑|节能|幕墙|采光|energy|building/i.test(text)) push("building energy saving");
+  if (/应用|场景|市场|未来|趋势|application|market|future/i.test(text)) push("applications market");
 
   return parts.join(" ").trim();
 }
@@ -1527,7 +1472,7 @@ function buildHeuristicResearchQuery(pageTitle, pageContent) {
 app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
-    service: "nanobanana-ppt-studio",
+    service: "pptgen",
     port: ACTIVE_PORT,
     generatedDir: GENERATED_DIR,
     libraryDocPath: LIBRARY_DOC_PATH,
@@ -1718,7 +1663,7 @@ app.post("/api/test-image-key", async (req, res) => {
       body: JSON.stringify({
         model: "qwen3.5-plus",
         messages: [
-          { role: "user", content: "璇峰彧鍥炲 OK" },
+          { role: "user", content: "请回复 OK" },
         ],
         stream: false,
       }),
@@ -1811,7 +1756,7 @@ app.post("/api/generate", async (req, res, next) => {
   }
 });
 
-app.post("/api/generate", async (req, res) => {
+app.post("/api/generate", async (req, res, next) => {
   const { apiKey, region, asyncMode, payload } = req.body || {};
   const effectiveApiKey = resolveDashScopeApiKey(apiKey);
 
@@ -1841,13 +1786,6 @@ app.post("/api/generate", async (req, res) => {
         receivedModel: payload?.model || "",
         messageCount: Array.isArray(payload?.input?.messages) ? payload.input.messages.length : 0,
       },
-    });
-  }
-
-  if (!payload || !payload.model || !payload.input?.messages?.length) {
-    return res.status(400).json({
-      code: "InvalidPayload",
-      message: "请求体不完整，请检查模型、消息和参数配置。",
     });
   }
 
@@ -2089,7 +2027,7 @@ app.post("/api/files/parse", upload.array("files", 20), async (req, res) => {
         const parsed = await extractFileText(file);
         const extractedText = normalizeExtractedText(parsed.extractedText || "");
         parsedFiles.push({
-          id: crypto.randomUUID(),
+          id: randomUUID(),
           name: file.originalname,
           extension: detectExtension(file.originalname),
           mimeType: file.mimetype || "",
@@ -2105,7 +2043,7 @@ app.post("/api/files/parse", upload.array("files", 20), async (req, res) => {
         });
       } catch (error) {
         parsedFiles.push({
-          id: crypto.randomUUID(),
+          id: randomUUID(),
           name: file.originalname,
           extension: detectExtension(file.originalname),
           mimeType: file.mimetype || "",
@@ -2206,11 +2144,11 @@ app.post("/api/download", async (req, res) => {
       response.headers.get("content-type"),
     );
     const fileName = [
-      "wan27",
+      "pptgen",
       buildTimestamp(),
       sanitizeSegment(requestId, "result"),
       sanitizeSegment(index, "1"),
-      crypto.randomUUID().slice(0, 8),
+      randomUUID().slice(0, 8),
     ].join("_") + extension;
 
     const targetPath = path.join(GENERATED_DIR, fileName);
@@ -2247,8 +2185,8 @@ app.post("/api/export-workflow-ppt", async (req, res) => {
     const layout = getPptLayout(slideAspect);
     const pptx = new PptxGenJS();
     const deckTitle = normalizeExportText(projectTitle) || "智能生成导出";
-    pptx.author = "Nano Banana PPT Studio";
-    pptx.company = "PPTgen";
+    pptx.author = "PPTGEN";
+    pptx.company = "PPTGEN";
     pptx.subject = "Workflow PPT export";
     pptx.title = deckTitle;
     pptx.lang = "zh-CN";
@@ -2321,17 +2259,23 @@ app.post("/api/export-workflow-ppt", async (req, res) => {
       });
 
       if (slideData.imageUrl) {
-        const image = await loadGeminiImageSource(slideData.imageUrl);
-        slide.addImage({
-          data: toDataUrl(image.buffer, image.mimeType),
-          altText: slideData.title,
-          ...toPptPosition({
-            left: margin,
-            top: imageTop,
-            width: innerWidth,
-            height: imageHeight,
-          }, slideSize, layout),
-        });
+        try {
+          const image = await loadGeminiImageSource(slideData.imageUrl);
+          if (image && image.buffer) {
+            slide.addImage({
+              data: toDataUrl(image.buffer, image.mimeType),
+              altText: slideData.title,
+              ...toPptPosition({
+                left: margin,
+                top: imageTop,
+                width: innerWidth,
+                height: imageHeight,
+              }, slideSize, layout),
+            });
+          }
+        } catch (error) {
+          console.warn("Skipping image for slide", slideData.pageNumber, ":", error.message);
+        }
       }
 
       slide.addShape(pptx.ShapeType.roundRect, {
@@ -2360,7 +2304,7 @@ app.post("/api/export-workflow-ppt", async (req, res) => {
       });
     }
 
-    const fileName = `${sanitizeSegment(deckTitle, "workflow-export")}_${buildTimestamp()}_${crypto.randomUUID().slice(0, 6)}.pptx`;
+    const fileName = `${sanitizeSegment(deckTitle, "workflow-export")}_${buildTimestamp()}_${randomUUID().slice(0, 6)}.pptx`;
     const targetPath = path.join(EXPORTS_DIR, fileName);
     await pptx.writeFile({ fileName: targetPath, compression: true });
 

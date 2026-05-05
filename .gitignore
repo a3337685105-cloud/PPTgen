@@ -1,5 +1,7 @@
 node_modules
 .npm-cache
+dist/
+dist-desktop/
 .env
 .env.local
 generated-images/*

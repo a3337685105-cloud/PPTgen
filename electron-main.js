@@ -1,4 +1,5 @@
 const { app: electronApp, BrowserWindow, shell, dialog } = require("electron");
+const fs = require("fs");
 const path = require("path");
 
 let mainWindow = null;
@@ -14,7 +15,7 @@ function createWindow(url) {
     height: 940,
     minWidth: 1180,
     minHeight: 760,
-    title: "PPTGEN",
+    title: "AI驱动演示文稿自动生成系统",
     backgroundColor: "#eef3fb",
     icon: resolveIconPath(),
     show: false,
@@ -52,13 +53,19 @@ async function closeLocalServer() {
 async function boot() {
   try {
     process.env.PPTGEN_NO_BROWSER = "1";
-    process.env.PPTGEN_RUNTIME_DIR ||= electronApp.isPackaged ? path.dirname(process.execPath) : __dirname;
+    if (!process.env.PPTGEN_RUNTIME_DIR) {
+      const runtimeDir = electronApp.isPackaged
+        ? path.join(electronApp.getPath("userData"), "runtime")
+        : __dirname;
+      fs.mkdirSync(runtimeDir, { recursive: true });
+      process.env.PPTGEN_RUNTIME_DIR = runtimeDir;
+    }
     const { startServer } = require("./server");
     const started = await startServer(Number(process.env.PORT) || 3000, { openBrowser: false });
     localServer = started.server;
     createWindow(`${started.url}/v2/index.html`);
   } catch (error) {
-    dialog.showErrorBox("PPTGEN 启动失败", error?.message || String(error));
+    dialog.showErrorBox("AI驱动演示文稿自动生成系统启动失败", error?.message || String(error));
     electronApp.quit();
   }
 }

@@ -1,13 +1,16 @@
 {
-  "name": "nanobanana-ppt-studio",
-  "version": "1.0.1",
-  "productName": "PPTGEN",
+  "name": "pptgen",
+  "version": "1.0.0",
+  "productName": "AI驱动演示文稿自动生成系统",
   "description": "Local PPT workflow studio powered by Nano Banana, Gemini, GPT Image 2 and reusable PPT harness tooling.",
   "main": "electron-main.js",
   "bin": "server.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win nsis --x64"
+    "start:desktop": "electron .",
+    "start:server": "node server.js",
+    "dist": "electron-builder --win nsis --x64",
+    "build:desktop": "electron-builder --win nsis --x64"
   },
   "pkg": {
     "scripts": [
@@ -26,8 +29,9 @@
   "build": {
     "appId": "com.pptgen.desktop",
     "asar": false,
+    "executableName": "AI驱动演示文稿自动生成系统V1.0",
     "directories": {
-      "output": "../dist"
+      "output": "dist-desktop"
     },
     "files": [
       "electron-main.js",
@@ -38,20 +42,26 @@
       "public/**/*"
     ],
     "win": {
+      "signAndEditExecutable": true,
       "target": [
         "nsis"
       ],
       "icon": "public/v2/assets/pptgen-icon.ico",
-      "artifactName": "PPTGEN-${version}-x64.${ext}"
+      "artifactName": "AI驱动演示文稿自动生成系统-V1.0-x64.${ext}"
     },
     "nsis": {
-      "oneClick": true,
+      "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": false
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "AI驱动演示文稿自动生成系统",
+      "deleteAppDataOnUninstall": false
     }
   },
   "license": "MIT",
   "dependencies": {
+    "docx": "^9.6.1",
     "express": "^4.21.2",
     "jszip": "^3.10.1",
     "multer": "^2.1.1",

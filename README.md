@@ -1,4 +1,4 @@
-# Nano Banana PPT Studio
+# PPTGEN
 
 Local PPT workflow studio for turning long-form content, rough ideas, or reference files into slide-ready image pages, then exporting a PowerPoint deck.
 
